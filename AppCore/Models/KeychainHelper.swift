@@ -2,12 +2,20 @@ import Foundation
 import Security
 
 // MARK: - Gestor Seguro de Tokens en iOS Keychain (Sin dependencias externas)
+/// Seguridad y Cifrado:
+/// - El token se almacena en el Keychain estándar del sistema operativo iOS
+///   utilizando el nivel de protección `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+/// - IMPORTANTE: El token NO está almacenado en el Secure Enclave (el Secure Enclave está
+///   reservado para claves asimétricas de 256 bits y biometría FaceID/TouchID, no para contraseñas simétricas).
+/// - ADVERTENCIA DE RED: La comunicación con el servidor local del PC se realiza a través de HTTP sin TLS,
+///   por lo que el token viaja en texto claro en la cabecera `Authorization: Bearer <token>` dentro de la red local.
 public enum KeychainHelper {
     private static let service = "com.cryptowidget.portfolio"
     private static let tokenAccount = "pc_server_api_token"
 
-    /// Guarda o elimina el token en el Keychain del dispositivo.
-    public static func saveToken(_ token: String) {
+    /// Guarda o elimina el token en el Keychain comprobando rigurosamente los códigos de retorno.
+    @discardableResult
+    public static func saveToken(_ token: String) -> Bool {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -16,22 +24,34 @@ public enum KeychainHelper {
         ]
 
         if trimmed.isEmpty {
-            SecItemDelete(query as CFDictionary)
-            return
+            let deleteStatus = SecItemDelete(query as CFDictionary)
+            return deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound
         }
 
-        guard let data = trimmed.data(using: .utf8) else { return }
+        guard let data = trimmed.data(using: .utf8) else { return false }
 
         let attributesToUpdate: [String: Any] = [
             kSecValueData as String: data
         ]
 
-        let status = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
-        if status == errSecItemNotFound {
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributesToUpdate as CFDictionary)
+        switch updateStatus {
+        case errSecSuccess:
+            return true
+        case errSecItemNotFound:
             var newItem = query
             newItem[kSecValueData as String] = data
             newItem[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            SecItemAdd(newItem as CFDictionary, nil)
+            let addStatus = SecItemAdd(newItem as CFDictionary, nil)
+            return addStatus == errSecSuccess
+        default:
+            // Si ocurrió otro error (ej: colisión o estado inconsistente), borrar y reintentar adición limpia
+            SecItemDelete(query as CFDictionary)
+            var newItem = query
+            newItem[kSecValueData as String] = data
+            newItem[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let retryAddStatus = SecItemAdd(newItem as CFDictionary, nil)
+            return retryAddStatus == errSecSuccess
         }
     }
 
@@ -54,12 +74,14 @@ public enum KeychainHelper {
     }
 
     /// Elimina el token del Keychain.
-    public static func deleteToken() {
+    @discardableResult
+    public static func deleteToken() -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: tokenAccount
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
     }
 }

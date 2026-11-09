@@ -43,8 +43,8 @@ public struct PortfolioPayload: Codable, Equatable {
 
     public init(
         updated_at: String = "",
-        currency: String = "USD",
-        currency_symbol: String = "$",
+        currency: String = "EUR",
+        currency_symbol: String = "€",
         total_invested: Double = 0.0,
         total_value: Double = 0.0,
         total_pnl: Double = 0.0,

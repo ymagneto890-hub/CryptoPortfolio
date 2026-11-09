@@ -5,7 +5,7 @@ import Combine
 public final class PortfolioViewModel: ObservableObject {
     // MARK: - Propiedades Publicadas (@Published)
     @Published public var portfolio: PortfolioPayload?
-    @Published public var displayCurrency: String = "USD"
+    @Published public var displayCurrency: String = "EUR"
     @Published public var selectedSymbol: String? = nil
     @Published public var isSyncing: Bool = false
     @Published public var isUpdatingPrices: Bool = false
@@ -14,6 +14,7 @@ public final class PortfolioViewModel: ObservableObject {
     @Published public var pcHost: String = "192.168.1.128"
     @Published public var pcPort: String = "8765"
     @Published public var lastLiveUpdateDate: Date? = nil
+    @Published public var isAppActive: Bool = true
 
     // MARK: - Claves Constantes de UserDefaults
     private enum Keys {
@@ -23,7 +24,9 @@ public final class PortfolioViewModel: ObservableObject {
         static let pcPort = "pc_server_port"
         static let displayCurrency = "preferred_display_currency"
         static let lastEurUsdRate = "last_valid_eur_usd_rate"
-        static let lastRateDate = "last_valid_eur_usd_rate_date"
+        static let lastEurRateDate = "last_valid_eur_usd_rate_date"
+        static let lastGbpUsdRate = "last_valid_gbp_usd_rate"
+        static let lastGbpRateDate = "last_valid_gbp_usd_rate_date"
         static let cachedQuotes = "cached_market_quotes_v2"
     }
 
@@ -33,11 +36,19 @@ public final class PortfolioViewModel: ObservableObject {
 
     private var currentUpdateId: Int = 0
     private var pendingRefreshRequested: Bool = false
-    private var activeDataTasks: [URLSessionDataTask] = []
-    private let lock = NSLock()
+    private var activeDataTasks: Set<URLSessionDataTask> = []
+    private let tasksLock = NSLock()
 
-    // MARK: - Tipos de Cambio y Caché de Cotizaciones
-    private var eurUsdRate: Double = 1.08
+    // MARK: - Tipos de Cambio Reales (CERO valores iniciales ficticios)
+    private var eurUsdRate: Double? = nil
+    private var eurUsdRateDate: Date? = nil
+
+    private var gbpUsdRate: Double? = nil
+    private var gbpUsdRateDate: Date? = nil
+
+    private let maxRateAgeSeconds: TimeInterval = 48 * 3600 // 48 horas máx antigüedad
+    private let maxQuoteAgeSeconds: TimeInterval = 7 * 86400 // 7 días máx cotización
+
     private var lastKnownQuotes: [String: MarketQuote] = [:]
 
     public init() {
@@ -51,31 +62,61 @@ public final class PortfolioViewModel: ObservableObject {
         }
         if let savedCurr = defaults.string(forKey: Keys.displayCurrency), !savedCurr.isEmpty {
             self.displayCurrency = savedCurr
+        } else {
+            self.displayCurrency = "EUR"
         }
 
-        let savedRate = defaults.double(forKey: Keys.lastEurUsdRate)
-        if savedRate > 0 {
-            self.eurUsdRate = savedRate
+        // Cargar tipo de cambio EUR/USD previo de la caché verificando fecha y antigüedad
+        let savedEurRate = defaults.double(forKey: Keys.lastEurUsdRate)
+        if savedEurRate > 0, let rateDate = defaults.object(forKey: Keys.lastEurRateDate) as? Date {
+            let age = Date().timeIntervalSince(rateDate)
+            if age >= 0 && age < maxRateAgeSeconds {
+                self.eurUsdRate = savedEurRate
+                self.eurUsdRateDate = rateDate
+            }
+        }
+
+        // Cargar tipo de cambio GBP/USD previo de la caché verificando fecha y antigüedad
+        let savedGbpRate = defaults.double(forKey: Keys.lastGbpUsdRate)
+        if savedGbpRate > 0, let rateDate = defaults.object(forKey: Keys.lastGbpRateDate) as? Date {
+            let age = Date().timeIntervalSince(rateDate)
+            if age >= 0 && age < maxRateAgeSeconds {
+                self.gbpUsdRate = savedGbpRate
+                self.gbpUsdRateDate = rateDate
+            }
         }
 
         // Cargar cotizaciones y datos previos guardados en el iPhone
         loadCachedQuotes()
         loadCachedData()
 
-        // Iniciar el temporizador a 30s y actualizar inmediatamente
+        // Iniciar en primer plano
         startForegroundUpdates()
-        refreshIfNeeded()
+        refreshImmediate()
     }
 
     deinit {
         stopForegroundUpdates()
     }
 
-    // MARK: - Ciclo de Vida en Primer Plano (start / stop / refresh)
+    // MARK: - Ciclo de Vida de iOS (Foreground / Background)
+    public func applicationDidBecomeActive() {
+        isAppActive = true
+        startForegroundUpdates()
+        refreshImmediate()
+    }
+
+    public func applicationWillResignActive() {
+        isAppActive = false
+        pendingRefreshRequested = false
+        stopForegroundUpdates()
+    }
+
     public func startForegroundUpdates() {
         stopForegroundUpdates()
         priceTimer = Timer.scheduledTimer(withTimeInterval: autoUpdateInterval, repeats: true) { [weak self] _ in
-            self?.updateLivePricesFromInternet()
+            guard let self = self, self.isAppActive else { return }
+            self.updateLivePricesFromInternet()
         }
         if let timer = priceTimer {
             RunLoop.main.add(timer, forMode: .common)
@@ -86,38 +127,34 @@ public final class PortfolioViewModel: ObservableObject {
         priceTimer?.invalidate()
         priceTimer = nil
         cancelActiveDataTasks()
+        isUpdatingPrices = false
     }
 
-    public func refreshIfNeeded() {
-        guard !isUpdatingPrices else { return }
-        if let lastUpdate = lastLiveUpdateDate {
-            if Date().timeIntervalSince(lastUpdate) >= 20.0 {
-                updateLivePricesFromInternet()
-            }
-        } else {
-            updateLivePricesFromInternet()
-        }
+    public func refreshImmediate() {
+        guard isAppActive && !isUpdatingPrices else { return }
+        updateLivePricesFromInternet()
+    }
+
+    // MARK: - Gestión Concurrente Segura de URLSession
+    private func registerTask(_ task: URLSessionDataTask) {
+        tasksLock.lock()
+        activeDataTasks.insert(task)
+        tasksLock.unlock()
+    }
+
+    private func unregisterTask(_ task: URLSessionDataTask) {
+        tasksLock.lock()
+        activeDataTasks.remove(task)
+        tasksLock.unlock()
     }
 
     private func cancelActiveDataTasks() {
-        lock.lock()
+        tasksLock.lock()
         for task in activeDataTasks {
             task.cancel()
         }
         activeDataTasks.removeAll()
-        lock.unlock()
-    }
-
-    private func trackTask(_ task: URLSessionDataTask) {
-        lock.lock()
-        activeDataTasks.append(task)
-        lock.unlock()
-    }
-
-    private func untrackTask(_ task: URLSessionDataTask) {
-        lock.lock()
-        activeDataTasks.removeAll { $0 === task }
-        lock.unlock()
+        tasksLock.unlock()
     }
 
     // MARK: - Selección de Activo en la Gráfica
@@ -131,19 +168,19 @@ public final class PortfolioViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Conmutador EUR <-> USD (Sin errores acumulativos)
+    // MARK: - Conmutador de Divisa (EUR <-> USD)
     public func toggleCurrency() {
         let oldCurr = displayCurrency
-        let newCurr = (oldCurr == "USD") ? "EUR" : "USD"
+        let newCurr = (oldCurr == "EUR") ? "USD" : "EUR"
 
         displayCurrency = newCurr
         UserDefaults.standard.set(newCurr, forKey: Keys.displayCurrency)
 
-        // Recalcular instantáneamente la cartera desde las posiciones base originales
         recalculatePortfolioFromBase(targetCurrency: newCurr)
 
-        // Solicitar actualización fresca de precios si no hay una en curso
-        updateLivePricesFromInternet()
+        if isAppActive && !isUpdatingPrices {
+            updateLivePricesFromInternet()
+        }
     }
 
     public func saveConnectionSettings(host: String, port: String) {
@@ -177,7 +214,16 @@ public final class PortfolioViewModel: ObservableObject {
     private func loadCachedQuotes() {
         if let data = UserDefaults.standard.data(forKey: Keys.cachedQuotes),
            let decoded = try? JSONDecoder().decode([String: MarketQuote].self, from: data) {
-            self.lastKnownQuotes = decoded
+            // Filtrar cotizaciones obsoletas
+            var freshQuotes: [String: MarketQuote] = [:]
+            let now = Date()
+            for (coin, quote) in decoded {
+                let age = now.timeIntervalSince(quote.timestamp)
+                if age >= 0 && age < maxQuoteAgeSeconds && quote.price > 0 {
+                    freshQuotes[coin] = quote
+                }
+            }
+            self.lastKnownQuotes = freshQuotes
         }
     }
 
@@ -187,11 +233,11 @@ public final class PortfolioViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 1. Sincronización Manual con el Servidor PC
+    // MARK: - 1. Sincronización con el Servidor PC
     public func performSync(isManual: Bool = true) {
+        guard isAppActive else { return }
         guard !isSyncing else { return }
 
-        // Validación de IP y Puerto
         let cleanHost = pcHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanPort = pcPort.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -214,21 +260,27 @@ public final class PortfolioViewModel: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 3.5
+        request.timeoutInterval = 4.0
 
-        // Autenticación segura mediante Bearer Token cargado desde Keychain
         if let token = KeychainHelper.loadToken(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        var syncTask: URLSessionDataTask?
+        syncTask = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            defer {
+                if let t = syncTask {
+                    self?.unregisterTask(t)
+                }
+            }
+
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self, self.isAppActive else { return }
                 self.isSyncing = false
 
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 401 {
-                        self.statusText = "Error: Token PC no autorizado"
+                        self.statusText = "Error: Token PC no autorizado (401)"
                         return
                     }
 
@@ -242,7 +294,6 @@ public final class PortfolioViewModel: ObservableObject {
                             self.saveToCache(newPayload)
                             UserDefaults.standard.set(Date(), forKey: Keys.lastSyncSuccess)
 
-                            // Recalcular con la divisa elegida y actualizar cotizaciones
                             self.recalculatePortfolioFromBase(targetCurrency: self.displayCurrency)
                             self.updateLivePricesFromInternet()
                             return
@@ -250,7 +301,6 @@ public final class PortfolioViewModel: ObservableObject {
                     }
                 }
 
-                // Si falla la conexión con el PC, conservar la cartera existente en caché
                 if self.portfolio != nil {
                     self.statusText = "PC desconectado (usando caché)"
                     self.updateLivePricesFromInternet()
@@ -259,8 +309,11 @@ public final class PortfolioViewModel: ObservableObject {
                 }
             }
         }
-        trackTask(task)
-        task.resume()
+
+        if let t = syncTask {
+            registerTask(t)
+            t.resume()
+        }
     }
 
     private func isValidHost(_ host: String) -> Bool {
@@ -275,13 +328,18 @@ public final class PortfolioViewModel: ObservableObject {
 
     // MARK: - 2. Actualización Autónoma de Precios por Internet
     public func updateLivePricesFromInternet() {
+        guard isAppActive else {
+            isUpdatingPrices = false
+            pendingRefreshRequested = false
+            return
+        }
+
         guard let currentPortfolio = self.portfolio,
               let positions = currentPortfolio.positions,
               !positions.isEmpty else {
             return
         }
 
-        // Control de concurrencia: evitar dos ciclos simultáneos
         if isUpdatingPrices {
             pendingRefreshRequested = true
             return
@@ -295,20 +353,35 @@ public final class PortfolioViewModel: ObservableObject {
         var freshlyFetchedQuotes: [String: MarketQuote] = [:]
         let localLock = NSLock()
 
-        // 1. Obtener tipo de cambio EUR/USD real desde Binance o Yahoo
+        // 1. Obtener tipo de cambio EUR/USD real
         group.enter()
         fetchRealEurUsdRate { [weak self] rate in
             if let r = rate, r > 0 {
-                self?.lock.lock()
+                self?.tasksLock.lock()
                 self?.eurUsdRate = r
+                self?.eurUsdRateDate = Date()
                 UserDefaults.standard.set(r, forKey: Keys.lastEurUsdRate)
-                UserDefaults.standard.set(Date(), forKey: Keys.lastRateDate)
-                self?.lock.unlock()
+                UserDefaults.standard.set(Date(), forKey: Keys.lastEurRateDate)
+                self?.tasksLock.unlock()
             }
             group.leave()
         }
 
-        // 2. Obtener cotizaciones para cada activo único del portafolio
+        // 2. Obtener tipo de cambio GBP/USD real
+        group.enter()
+        fetchRealGbpUsdRate { [weak self] rate in
+            if let r = rate, r > 0 {
+                self?.tasksLock.lock()
+                self?.gbpUsdRate = r
+                self?.gbpUsdRateDate = Date()
+                UserDefaults.standard.set(r, forKey: Keys.lastGbpUsdRate)
+                UserDefaults.standard.set(Date(), forKey: Keys.lastGbpRateDate)
+                self?.tasksLock.unlock()
+            }
+            group.leave()
+        }
+
+        // 3. Obtener cotizaciones de cada activo
         let uniqueCoins = Array(Set(positions.map { $0.coin }))
 
         for coin in uniqueCoins {
@@ -316,7 +389,6 @@ public final class PortfolioViewModel: ObservableObject {
             group.enter()
 
             if samplePos.source == "yahoo" {
-                // Si la divisa de visualización es EUR y existe símbolo en EUR, preferirlo
                 let currentTarget = self.displayCurrency
                 let preferredSymbol: String
                 if currentTarget == "EUR", let eurSym = samplePos.yahoo_sym_eur, !eurSym.isEmpty {
@@ -335,10 +407,9 @@ public final class PortfolioViewModel: ObservableObject {
                     group.leave()
                 }
             } else {
-                // Cripto vía Binance (USDT)
                 fetchBinancePrice(symbol: "\(coin)USDT") { [weak self] price in
                     if let p = price, p > 0 {
-                        let q = MarketQuote(symbol: coin, price: p, currency: "USD")
+                        let q = MarketQuote(symbol: coin, price: p, currency: "USD", timestamp: Date())
                         localLock.lock()
                         freshlyFetchedQuotes[coin] = q
                         self?.lastKnownQuotes[coin] = q
@@ -352,71 +423,84 @@ public final class PortfolioViewModel: ObservableObject {
         group.notify(queue: .main) { [weak self] in
             guard let self = self else { return }
 
-            // Comprobación de carrera: descartar si se lanzó una actualización posterior
+            guard self.isAppActive else {
+                self.isUpdatingPrices = false
+                self.pendingRefreshRequested = false
+                return
+            }
+
             guard thisUpdateId == self.currentUpdateId else { return }
 
             self.isUpdatingPrices = false
             self.lastLiveUpdateDate = Date()
             self.saveCachedQuotes()
 
-            // Determinar estado de la actualización
             let totalExpected = uniqueCoins.count
             let totalReceived = freshlyFetchedQuotes.count
             if totalReceived == totalExpected {
                 self.statusText = "Actualizado"
             } else if totalReceived > 0 {
-                self.statusText = "Actualización parcial (\(totalReceived)/\(totalExpected))"
+                self.statusText = "Parcial (\(totalReceived)/\(totalExpected))"
             } else {
-                self.statusText = "Sin conexión (usando últimos precios)"
+                self.statusText = "Sin conexión (últimas cotizaciones)"
             }
 
-            // Aplicar los precios recalculando la cartera sobre la divisa actualmente activa
             self.recalculatePortfolioFromBase(targetCurrency: self.displayCurrency)
 
-            // Si se solicitó una actualización mientras esta procesaba, ejecutarla ahora
-            if self.pendingRefreshRequested {
+            if self.pendingRefreshRequested && self.isAppActive {
                 self.pendingRefreshRequested = false
                 self.updateLivePricesFromInternet()
+            } else {
+                self.pendingRefreshRequested = false
             }
         }
     }
 
-    // MARK: - Recálculo Matemático Consistente desde Posiciones Base
+    // MARK: - Recálculo Matemático Riguroso desde Posiciones Base
     private func recalculatePortfolioFromBase(targetCurrency: String) {
         guard var current = self.portfolio, let positions = current.positions, !positions.isEmpty else {
             return
         }
 
-        let targetSym = (targetCurrency == "EUR") ? "€" : "$"
+        let targetSym = (targetCurrency == "EUR") ? "€" : (targetCurrency == "GBP" ? "£" : "$")
         var totalInvested: Double = 0.0
         var totalCurrentVal: Double = 0.0
+        var hasAtLeastOneValidPrice = false
 
         var coinInvestedMap: [String: Double] = [:]
         var coinValMap: [String: Double] = [:]
         var coinMetaMap: [String: RawPosition] = [:]
-        var coinLivePriceMap: [String: Double] = [:]
+        var coinLivePriceMap: [String: Double?] = [:]
 
         for pos in positions {
             coinMetaMap[pos.coin] = pos
 
-            // Convertir montos invertidos y precio de entrada desde su moneda original al target
-            let inv = convertAmount(pos.invested, from: pos.currency, to: targetCurrency)
-            let ep = convertAmount(pos.entry_price, from: pos.currency, to: targetCurrency)
+            // Conversión estricta de inversión inicial
+            let inv = convertAmount(pos.invested, from: pos.currency, to: targetCurrency) ?? pos.invested
+            let ep = convertAmount(pos.entry_price, from: pos.currency, to: targetCurrency) ?? pos.entry_price
 
-            // Obtener el precio actual: usar la última cotización real válida
-            var livePriceInTarget: Double = ep
+            // Determinar cotización de mercado real
+            var livePriceInTarget: Double? = nil
             if let quote = lastKnownQuotes[pos.coin], let converted = convertQuotePrice(quote, to: targetCurrency) {
                 livePriceInTarget = converted
+                hasAtLeastOneValidPrice = true
             } else if let cachedItem = current.items.first(where: { $0.symbol == pos.coin }),
                       let itemPrice = cachedItem.current_price, itemPrice > 0 {
-                // Fallback a la última valoración en caché del ítem si aún no hay quote directa
-                livePriceInTarget = (current.currency == targetCurrency) ? itemPrice : convertAmount(itemPrice, from: current.currency, to: targetCurrency)
+                livePriceInTarget = convertAmount(itemPrice, from: current.currency, to: targetCurrency)
+                if livePriceInTarget != nil {
+                    hasAtLeastOneValidPrice = true
+                }
             }
 
             coinLivePriceMap[pos.coin] = livePriceInTarget
 
-            // Valor actual = invertido * (precio_actual / precio_entrada)
-            let curVal = (ep > 0) ? (inv * (livePriceInTarget / ep)) : inv
+            // Valor actual: SI NO HAY COTIZACIÓN VÁLIDA, NO ASUMIR QUE VALOR ES IGUAL A ENTRADA
+            let curVal: Double
+            if let lp = livePriceInTarget, ep > 0 {
+                curVal = inv * (lp / ep)
+            } else {
+                curVal = 0.0
+            }
 
             totalInvested += inv
             totalCurrentVal += curVal
@@ -424,19 +508,31 @@ public final class PortfolioViewModel: ObservableObject {
             coinValMap[pos.coin, default: 0.0] += curVal
         }
 
-        let totalPnl = totalCurrentVal - totalInvested
-        let totalPnlPct = (totalInvested > 0) ? ((totalPnl / totalInvested) * 100.0) : 0.0
+        let totalPnl = hasAtLeastOneValidPrice ? (totalCurrentVal - totalInvested) : 0.0
+        let totalPnlPct = (hasAtLeastOneValidPrice && totalInvested > 0) ? ((totalPnl / totalInvested) * 100.0) : 0.0
 
         var newItems: [PortfolioItem] = []
-        let sortedCoins = coinValMap.sorted { $0.value > $1.value }
+        let sortedCoins = coinInvestedMap.sorted { (coinValMap[$0.key] ?? 0) > (coinValMap[$1.key] ?? 0) }
 
-        for (ck, curVal) in sortedCoins {
+        for (ck, _) in sortedCoins {
             let inv = coinInvestedMap[ck] ?? 0.0
-            let pnl = curVal - inv
-            let pnlPct = (inv > 0) ? ((pnl / inv) * 100.0) : 0.0
-            let sharePct = (totalCurrentVal > 0) ? ((curVal / totalCurrentVal) * 100.0) : 0.0
+            let curVal = coinValMap[ck] ?? 0.0
+            let lp = coinLivePriceMap[ck] ?? nil
             let meta = coinMetaMap[ck]
-            let livePrice = coinLivePriceMap[ck] ?? 0.0
+
+            let pnl: Double
+            let pnlPct: Double
+            let sharePct: Double
+
+            if lp != nil && inv > 0 {
+                pnl = curVal - inv
+                pnlPct = (pnl / inv) * 100.0
+                sharePct = (totalCurrentVal > 0) ? ((curVal / totalCurrentVal) * 100.0) : 0.0
+            } else {
+                pnl = 0.0
+                pnlPct = 0.0
+                sharePct = (totalInvested > 0) ? ((inv / totalInvested) * 100.0) : 0.0
+            }
 
             newItems.append(PortfolioItem(
                 symbol: ck,
@@ -448,14 +544,14 @@ public final class PortfolioViewModel: ObservableObject {
                 pnl: round2(pnl),
                 pnl_pct: round2(pnlPct),
                 share_pct: (sharePct * 10).rounded() / 10,
-                current_price: livePrice
+                current_price: lp
             ))
         }
 
         current.currency = targetCurrency
         current.currency_symbol = targetSym
         current.total_invested = round2(totalInvested)
-        current.total_value = round2(totalCurrentVal)
+        current.total_value = hasAtLeastOneValidPrice ? round2(totalCurrentVal) : 0.0
         current.total_pnl = round2(totalPnl)
         current.total_pnl_pct = round2(totalPnlPct)
         current.items = newItems
@@ -466,48 +562,111 @@ public final class PortfolioViewModel: ObservableObject {
         saveToCache(current)
     }
 
-    // MARK: - Conversión de Divisas
-    public func convertAmount(_ amount: Double, from src: String, to dst: String) -> Double {
-        let s = src.uppercased()
-        let d = dst.uppercased()
-        if s == d { return amount }
-        if s == "EUR" && d == "USD" { return amount * eurUsdRate }
-        if s == "USD" && d == "EUR" { return (eurUsdRate > 0) ? (amount / eurUsdRate) : amount }
-        return amount
-    }
+    // MARK: - Conversión Exacta de Divisas (EUR, USD, GBP, GBp)
+    public func convertAmount(_ amount: Double, from src: String, to dst: String) -> Double? {
+        var s = src.trimmingCharacters(in: .whitespacesAndNewlines)
+        let d = dst.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        var val = amount
 
-    private func convertQuotePrice(_ quote: MarketQuote, to targetCurr: String) -> Double? {
-        let src = quote.currency.uppercased()
-        let dst = targetCurr.uppercased()
-        var price = quote.price
-
-        // Manejo especial de peniques británicos (GBp) a Libras (GBP)
-        if quote.currency == "GBp" {
-            price = price / 100.0
+        if s == "GBp" || s == "GBX" {
+            val = val / 100.0
+            s = "GBP"
+        } else {
+            s = s.uppercased()
         }
 
-        if src == dst || (quote.currency == "GBp" && dst == "GBP") {
-            return price
+        if s == d { return val }
+
+        if s == "USD" && d == "EUR" {
+            guard let rate = eurUsdRate, rate > 0 else { return nil }
+            return val / rate
+        }
+        if s == "EUR" && d == "USD" {
+            guard let rate = eurUsdRate, rate > 0 else { return nil }
+            return val * rate
+        }
+
+        if s == "GBP" && d == "USD" {
+            guard let gRate = gbpUsdRate, gRate > 0 else { return nil }
+            return val * gRate
+        }
+        if s == "USD" && d == "GBP" {
+            guard let gRate = gbpUsdRate, gRate > 0 else { return nil }
+            return val / gRate
+        }
+
+        if s == "GBP" && d == "EUR" {
+            guard let gRate = gbpUsdRate, gRate > 0,
+                  let eRate = eurUsdRate, eRate > 0 else { return nil }
+            return (val * gRate) / eRate
+        }
+        if s == "EUR" && d == "GBP" {
+            guard let gRate = gbpUsdRate, gRate > 0,
+                  let eRate = eurUsdRate, eRate > 0 else { return nil }
+            return (val * eRate) / gRate
+        }
+
+        return nil
+    }
+
+    public func convertQuotePrice(_ quote: MarketQuote, to targetCurr: String) -> Double? {
+        var rawPrice = quote.price
+        guard rawPrice > 0 else { return nil }
+
+        var src = quote.currency.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dst = targetCurr.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Manejo estricto de peniques británicos (GBp a GBP: división por 100)
+        if src == "GBp" || src == "GBX" {
+            rawPrice = rawPrice / 100.0
+            src = "GBP"
+        } else {
+            src = src.uppercased()
+        }
+
+        if src == dst {
+            return rawPrice
         }
 
         if src == "USD" && dst == "EUR" {
-            return (eurUsdRate > 0) ? (price / eurUsdRate) : nil
+            guard let rate = eurUsdRate, rate > 0 else { return nil }
+            return rawPrice / rate
         }
         if src == "EUR" && dst == "USD" {
-            return price * eurUsdRate
+            guard let rate = eurUsdRate, rate > 0 else { return nil }
+            return rawPrice * rate
         }
 
-        // Si la moneda es distinta y no hay conversión directa fiable, conservar el valor conocido
-        return price
+        if src == "GBP" && dst == "USD" {
+            guard let gRate = gbpUsdRate, gRate > 0 else { return nil }
+            return rawPrice * gRate
+        }
+        if src == "USD" && dst == "GBP" {
+            guard let gRate = gbpUsdRate, gRate > 0 else { return nil }
+            return rawPrice / gRate
+        }
+
+        if src == "GBP" && dst == "EUR" {
+            guard let gRate = gbpUsdRate, gRate > 0,
+                  let eRate = eurUsdRate, eRate > 0 else { return nil }
+            return (rawPrice * gRate) / eRate
+        }
+        if src == "EUR" && dst == "GBP" {
+            guard let gRate = gbpUsdRate, gRate > 0,
+                  let eRate = eurUsdRate, eRate > 0 else { return nil }
+            return (rawPrice * eRate) / gRate
+        }
+
+        // Si no existe tipo de cambio fiable, no devolver cotización en moneda errónea
+        return nil
     }
 
     private func round2(_ val: Double) -> Double {
         (val * 100).rounded() / 100
     }
 
-    // MARK: - Clientes de Red Nativos (Binance + Yahoo Finance)
+    // MARK: - Clientes de Red Nativos
     private func fetchRealEurUsdRate(completion: @escaping (Double?) -> Void) {
-        // Intento 1: Binance EURUSDT
         guard let url = URL(string: "https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT") else {
             completion(nil)
             return
@@ -515,7 +674,13 @@ public final class PortfolioViewModel: ObservableObject {
         var req = URLRequest(url: url)
         req.timeoutInterval = 4.0
 
-        let task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            defer {
+                if let t = task {
+                    self?.unregisterTask(t)
+                }
+            }
             if let data = data, error == nil,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let priceStr = json["price"] as? String,
@@ -523,12 +688,12 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(rate)
                 return
             }
-
-            // Fallback: Yahoo Finance EURUSD=X
             self?.fetchYahooEurUsdFallback(completion: completion)
         }
-        trackTask(task)
-        task.resume()
+        if let t = task {
+            registerTask(t)
+            t.resume()
+        }
     }
 
     private func fetchYahooEurUsdFallback(completion: @escaping (Double?) -> Void) {
@@ -540,7 +705,13 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 4.0
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
-        let task = URLSession.shared.dataTask(with: req) { data, _, _ in
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            defer {
+                if let t = task {
+                    self?.unregisterTask(t)
+                }
+            }
             guard let data = data,
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let chart = root["chart"] as? [String: Any],
@@ -553,8 +724,74 @@ public final class PortfolioViewModel: ObservableObject {
             }
             completion(price)
         }
-        trackTask(task)
-        task.resume()
+        if let t = task {
+            registerTask(t)
+            t.resume()
+        }
+    }
+
+    private func fetchRealGbpUsdRate(completion: @escaping (Double?) -> Void) {
+        guard let url = URL(string: "https://api.binance.com/api/v3/ticker/price?symbol=GBPUSDT") else {
+            completion(nil)
+            return
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 4.0
+
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            defer {
+                if let t = task {
+                    self?.unregisterTask(t)
+                }
+            }
+            if let data = data, error == nil,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let priceStr = json["price"] as? String,
+               let rate = Double(priceStr), rate > 0 {
+                completion(rate)
+                return
+            }
+            self?.fetchYahooGbpUsdFallback(completion: completion)
+        }
+        if let t = task {
+            registerTask(t)
+            t.resume()
+        }
+    }
+
+    private func fetchYahooGbpUsdFallback(completion: @escaping (Double?) -> Void) {
+        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/GBPUSD=X?interval=15m&range=1d") else {
+            completion(nil)
+            return
+        }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 4.0
+        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
+
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            defer {
+                if let t = task {
+                    self?.unregisterTask(t)
+                }
+            }
+            guard let data = data,
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let chart = root["chart"] as? [String: Any],
+                  let results = chart["result"] as? [[String: Any]],
+                  let first = results.first,
+                  let meta = first["meta"] as? [String: Any],
+                  let price = meta["regularMarketPrice"] as? Double, price > 0 else {
+                completion(nil)
+                return
+            }
+            completion(price)
+        }
+        if let t = task {
+            registerTask(t)
+            t.resume()
+        }
     }
 
     private func fetchBinancePrice(symbol: String, completion: @escaping (Double?) -> Void) {
@@ -565,19 +802,26 @@ public final class PortfolioViewModel: ObservableObject {
         var req = URLRequest(url: url)
         req.timeoutInterval = 4.0
 
-        let task = URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
-            defer { if let t = self?.activeDataTasks.last { self?.untrackTask(t) } }
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            defer {
+                if let t = task {
+                    self?.unregisterTask(t)
+                }
+            }
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let priceStr = json["price"] as? String,
-                  let price = Double(priceStr) else {
+                  let price = Double(priceStr), price > 0 else {
                 completion(nil)
                 return
             }
             completion(price)
         }
-        trackTask(task)
-        task.resume()
+        if let t = task {
+            registerTask(t)
+            t.resume()
+        }
     }
 
     private func fetchYahooPrice(symbol: String, completion: @escaping (MarketQuote?) -> Void) {
@@ -590,24 +834,32 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 4.5
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
-        let task = URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
-            defer { if let t = self?.activeDataTasks.last { self?.untrackTask(t) } }
+        var task: URLSessionDataTask?
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            defer {
+                if let t = task {
+                    self?.unregisterTask(t)
+                }
+            }
             guard let data = data,
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let chart = root["chart"] as? [String: Any],
                   let results = chart["result"] as? [[String: Any]],
                   let first = results.first,
                   let meta = first["meta"] as? [String: Any],
-                  let price = meta["regularMarketPrice"] as? Double else {
+                  let price = meta["regularMarketPrice"] as? Double, price > 0,
+                  let currency = meta["currency"] as? String, !currency.isEmpty else {
+                // Si Yahoo NO devuelve meta.currency, NO asumir USD; descartar
                 completion(nil)
                 return
             }
 
-            let currency = (meta["currency"] as? String) ?? "USD"
-            let quote = MarketQuote(symbol: symbol, price: price, currency: currency)
+            let quote = MarketQuote(symbol: symbol, price: price, currency: currency, timestamp: Date())
             completion(quote)
         }
-        trackTask(task)
-        task.resume()
+        if let t = task {
+            registerTask(t)
+            t.resume()
+        }
     }
 }

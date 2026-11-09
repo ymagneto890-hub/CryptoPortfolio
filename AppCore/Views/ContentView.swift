@@ -138,10 +138,9 @@ public struct ContentView: View {
         .onChange(of: scenePhase) { phase in
             switch phase {
             case .active:
-                vm.startForegroundUpdates()
-                vm.refreshIfNeeded()
+                vm.applicationDidBecomeActive()
             case .inactive, .background:
-                vm.stopForegroundUpdates()
+                vm.applicationWillResignActive()
             @unknown default:
                 break
             }

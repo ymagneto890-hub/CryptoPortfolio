@@ -52,20 +52,31 @@ public struct AssetRowView: View {
 
                     Spacer(minLength: 2)
 
-                    Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            (item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
-                                .opacity(0.40)
-                        )
-                        .clipShape(Capsule())
+                    if let lp = item.current_price, lp > 0 {
+                        Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                (item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
+                                    .opacity(0.40)
+                            )
+                            .clipShape(Capsule())
+                    } else {
+                        Text("—")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundColor(Color(white: 0.6))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color(white: 0.2).opacity(0.4))
+                            .clipShape(Capsule())
+                    }
+
                 }
 
-                // Fila 2: Precio actual de mercado en grande y limpio
-                Text(formattedPrice(item.current_price ?? 0.0))
+                // Fila 2: Precio actual de mercado en grande y limpio (o — si no hay cotización)
+                Text(formattedPrice(item.current_price))
                     .font(.system(size: 17, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -84,8 +95,8 @@ public struct AssetRowView: View {
         }
     }
 
-    private func formattedPrice(_ val: Double) -> String {
-        guard val > 0 else { return "—" }
+    private func formattedPrice(_ priceOpt: Double?) -> String {
+        guard let val = priceOpt, val > 0 else { return "—" }
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencySymbol = currencySymbol

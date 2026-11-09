@@ -101,16 +101,26 @@ public struct DonutChartView: View {
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(Color(white: 0.68))
 
-                        Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(
-                                (item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
-                                    .opacity(0.45)
-                            )
-                            .clipShape(Capsule())
+                        if let lp = item.current_price, lp > 0 {
+                            Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(
+                                    (item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
+                                        .opacity(0.45)
+                                )
+                                .clipShape(Capsule())
+                        } else {
+                            Text("Sin cotización")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundColor(Color(white: 0.6))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color(white: 0.2).opacity(0.4))
+                                .clipShape(Capsule())
+                        }
                     }
                     .frame(width: size - (lineWidth * 2) - 8)
                     .contentShape(Circle())

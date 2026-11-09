@@ -73,13 +73,13 @@ public struct SettingsView: View {
                         Image(systemName: "key.fill")
                             .foregroundColor(.gray)
                         if showToken {
-                            TextField("Token de acceso (opcional)", text: $inputToken)
+                            TextField("Token de acceso obligatorio", text: $inputToken)
                                 .font(.system(size: 13, design: .monospaced))
                                 .foregroundColor(.white)
                                 .autocapitalization(.none)
                                 .disableAutocorrection(true)
                         } else {
-                            SecureField("Token de acceso (opcional)", text: $inputToken)
+                            SecureField("Token de acceso obligatorio", text: $inputToken)
                                 .font(.system(size: 13, design: .monospaced))
                                 .foregroundColor(.white)
                                 .autocapitalization(.none)
@@ -115,7 +115,7 @@ public struct SettingsView: View {
                     .cornerRadius(10)
                 }
 
-                Text("El token se almacena cifrado en el Keychain del iPhone. Si tu servidor no requiere token, déjalo en blanco.")
+                Text("El token se guarda en el Keychain del iPhone (no en Secure Enclave). En la red local, el tráfico HTTP viaja sin cifrar TLS.")
                     .font(.system(size: 10))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
