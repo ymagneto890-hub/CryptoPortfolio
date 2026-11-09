@@ -4,14 +4,14 @@ import Combine
 
 public final class PortfolioViewModel: ObservableObject {
     @Published public var portfolio: PortfolioPayload?
+    @Published public var selectedSymbol: String? = nil
     @Published public var isSyncing: Bool = false
-    @Published public var statusText: String = "Iniciando..."
-    @Published public var isConnectedToday: Bool = false
+    @Published public var statusText: String = "Listo"
+    @Published public var hasSyncedOnce: Bool = false
     @Published public var pcHost: String = "192.168.1.128"
     @Published public var pcPort: String = "8765"
 
     private let userDefaultsKey = "cached_portfolio_data"
-    private let lastAttemptKey = "last_sync_attempt_day"
     private let lastSuccessKey = "last_sync_success_date"
     private let hostKey = "pc_server_host"
     private let portKey = "pc_server_port"
@@ -30,16 +30,24 @@ public final class PortfolioViewModel: ObservableObject {
         // 1. Cargar posiciones guardadas en el iPhone
         loadCachedData()
 
-        // 2. Comprobar si hoy toca pedir actualización de posiciones al PC (1 vez al día)
-        checkDailyPCSync()
-
-        // 3. Actualizar precios en vivo desde Internet por sí solo y programar timer cada 15s
+        // 2. Actualizar precios en vivo desde Internet automáticamente cada 15s
+        // (La sincronización con el PC ahora es 100% manual desde el botón de arriba)
         updateLivePricesFromInternet()
         startAutoPriceTimer()
     }
 
     deinit {
         priceTimer?.invalidate()
+    }
+
+    public func toggleSelection(for symbol: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if selectedSymbol == symbol {
+                selectedSymbol = nil
+            } else {
+                selectedSymbol = symbol
+            }
+        }
     }
 
     private func startAutoPriceTimer() {
@@ -56,17 +64,12 @@ public final class PortfolioViewModel: ObservableObject {
         UserDefaults.standard.set(self.pcPort, forKey: portKey)
     }
 
-    private func todayString() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
-    }
-
     public func loadCachedData() {
         if let data = UserDefaults.standard.data(forKey: userDefaultsKey) {
             let decoder = JSONDecoder()
             if let decoded = try? decoder.decode(PortfolioPayload.self, from: data) {
                 self.portfolio = decoded
+                self.hasSyncedOnce = true
             }
         }
         updateStatusLabel(liveTime: nil)
@@ -82,59 +85,36 @@ public final class PortfolioViewModel: ObservableObject {
     private func updateStatusLabel(liveTime: String?) {
         var pcPart = "Sin sinc. PC"
         if let lastSuccess = UserDefaults.standard.object(forKey: lastSuccessKey) as? Date {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            if formatter.string(from: lastSuccess) == todayString() {
-                self.isConnectedToday = true
-                pcPart = "PC al día"
-            } else {
-                self.isConnectedToday = false
-                let dayFormatter = DateFormatter()
-                dayFormatter.dateFormat = "dd/MM"
-                pcPart = "PC: \(dayFormatter.string(from: lastSuccess))"
-            }
+            self.hasSyncedOnce = true
+            let dayFormatter = DateFormatter()
+            dayFormatter.dateFormat = "dd/MM HH:mm"
+            pcPart = "PC: \(dayFormatter.string(from: lastSuccess))"
         }
 
         if let live = liveTime {
-            self.statusText = "En vivo (\(live)) • \(pcPart)"
+            self.statusText = "En vivo \(live) • \(pcPart)"
         } else if self.portfolio != nil {
-            self.statusText = " Guardado • \(pcPart)"
+            self.statusText = "Precios en vivo • \(pcPart)"
         } else {
-            self.statusText = "Esperando 1ª conexión con PC..."
+            self.statusText = "Pulsa 'Sincronizar PC' arriba"
         }
     }
 
-    // MARK: - 1. Petición Diaria al Software del PC (Para nuevos activos o capital)
-    public func checkDailyPCSync() {
-        let today = todayString()
-        let lastAttempt = UserDefaults.standard.string(forKey: lastAttemptKey) ?? ""
-
-        if lastAttempt == today {
-            // Ya se intentó conectar con el PC hoy; no volver a pedir al PC hasta mañana
-            return
-        }
-
-        performSync(isManual: false)
-    }
-
+    // MARK: - 1. Sincronización Manual con el PC (Botón superior)
     public func performSync(isManual: Bool = true) {
         guard !isSyncing else { return }
         isSyncing = true
-        if isManual {
-            statusText = "Sincronizando posiciones con PC..."
-        }
-
-        // Registrar el intento de hoy con el PC
-        UserDefaults.standard.set(todayString(), forKey: lastAttemptKey)
+        statusText = "Conectando con el PC..."
 
         guard let url = URL(string: "http://\(pcHost):\(pcPort)/api/portfolio") else {
             isSyncing = false
+            statusText = "IP no válida"
             return
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 2.5
+        request.timeoutInterval = 3.0
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
@@ -146,7 +126,7 @@ public final class PortfolioViewModel: ObservableObject {
                     let decoder = JSONDecoder()
                     if let newPayload = try? decoder.decode(PortfolioPayload.self, from: data) {
                         self.portfolio = newPayload
-                        self.isConnectedToday = true
+                        self.hasSyncedOnce = true
                         UserDefaults.standard.set(data, forKey: self.userDefaultsKey)
                         UserDefaults.standard.set(Date(), forKey: self.lastSuccessKey)
 
@@ -154,17 +134,16 @@ public final class PortfolioViewModel: ObservableObject {
                         tf.dateFormat = "HH:mm:ss"
                         self.updateStatusLabel(liveTime: tf.string(from: Date()))
 
-                        // Tras recibir las posiciones del PC, actualizar precios en vivo
                         self.updateLivePricesFromInternet()
                         return
                     }
                 }
 
-                // Si el PC estaba apagado hoy, usa el portfolio guardado y actualiza precios por internet
                 if self.portfolio != nil {
+                    self.statusText = "PC apagado/fuera de red • Usando datos guardados"
                     self.updateLivePricesFromInternet()
                 } else {
-                    self.statusText = "PC desconectado. Toca para sincronizar."
+                    self.statusText = "No se encontró el PC (revisa WiFi)"
                 }
             }
         }.resume()
@@ -185,7 +164,6 @@ public final class PortfolioViewModel: ObservableObject {
         var fetchedPricesUSD: [String: Double] = [:]
         let lock = NSLock()
 
-        // A. Obtener tipo de cambio EUR/USD en vivo desde Binance
         group.enter()
         fetchBinancePrice(symbol: "EURUSDT") { rate in
             if let r = rate, r > 0 {
@@ -196,7 +174,6 @@ public final class PortfolioViewModel: ObservableObject {
             group.leave()
         }
 
-        // B. Obtener precio en vivo de cada activo desde Internet
         for coin in uniqueCoins {
             guard let samplePos = positions.first(where: { $0.coin == coin }) else { continue }
             group.enter()
@@ -223,7 +200,6 @@ public final class PortfolioViewModel: ObservableObject {
             }
         }
 
-        // C. Recalcular el portafolio y el círculo en tiempo real en el iPhone
         group.notify(queue: .main) { [weak self] in
             guard let self = self, var updated = self.portfolio else { return }
             guard !fetchedPricesUSD.isEmpty else { return }

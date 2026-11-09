@@ -1,4 +1,4 @@
-name: Build Crypto Portfolio iOS IPA
+name: Build iOS App
 
 on:
   push:
@@ -20,21 +20,21 @@ jobs:
 
       - name: Build Pure Native iOS IPA
         run: |
-          xcodebuild -project CryptoPortfolio.xcodeproj \
-            -scheme CryptoPortfolio \
+          xcodebuild -project AppCore.xcodeproj \
+            -scheme AppCore \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -archivePath CryptoPortfolio.xcarchive \
+            -archivePath AppCore.xcarchive \
             archive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
-          cp CryptoPortfolio/Icon-60@2x.png CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app/
-          cp CryptoPortfolio/Icon-60@3x.png CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app/
+          cp AppCore/Icon-60@2x.png AppCore.xcarchive/Products/Applications/AppCore.app/
+          cp AppCore/Icon-60@3x.png AppCore.xcarchive/Products/Applications/AppCore.app/
 
           mkdir -p Payload
-          cp -r CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app Payload/
+          cp -r AppCore.xcarchive/Products/Applications/AppCore.app Payload/
           zip -r CryptoPortfolio.ipa Payload
           ls -lh CryptoPortfolio.ipa
 

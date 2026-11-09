@@ -1,15 +1,15 @@
-name: CryptoPortfolio
+name: AppCore
 options:
   bundleIdPrefix: com.cryptowidget
 targets:
-  CryptoPortfolio:
+  AppCore:
     type: application
     platform: iOS
     deploymentTarget: "15.0"
     sources:
-      - path: CryptoPortfolio
+      - path: AppCore
     info:
-      path: CryptoPortfolio/Info.plist
+      path: AppCore/Info.plist
       properties:
         CFBundleDisplayName: Portfolio
         UILaunchScreen: {}
