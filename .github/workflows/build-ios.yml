@@ -79,7 +79,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
           mkdir -p Payload
           cp -R "$APP" Payload/
-          (cd Payload && zip -qry ../CryptoPortfolio.ipa AppCore.app)
+          zip -r CryptoPortfolio.ipa Payload
           test -s CryptoPortfolio.ipa
           echo "=== IPA SIZE ==="
           ls -lh CryptoPortfolio.ipa
