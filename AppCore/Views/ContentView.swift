@@ -14,7 +14,7 @@ public struct ContentView: View {
 
     public var body: some View {
         ZStack {
-            // Fondo negro profundo
+            // Fondo negro profundo para iPhone SE (pantalla 4 pulgadas)
             Color(red: 0.04, green: 0.05, blue: 0.07).ignoresSafeArea()
 
             VStack(spacing: 10) {
@@ -75,6 +75,9 @@ public struct ContentView: View {
                         totalPnl: payload.total_pnl,
                         totalPnlPct: payload.total_pnl_pct,
                         currencySymbol: payload.currency_symbol,
+                        valuationStatus: payload.valuation_status,
+                        valuedCount: payload.valued_count,
+                        totalCount: payload.total_count,
                         selectedSymbol: vm.selectedSymbol,
                         isWaitingFirstSync: false,
                         onCenterTap: {
@@ -109,10 +112,13 @@ public struct ContentView: View {
 
                     DonutChartView(
                         items: [],
-                        totalValue: 0,
-                        totalPnl: 0,
-                        totalPnlPct: 0,
+                        totalValue: nil,
+                        totalPnl: nil,
+                        totalPnlPct: nil,
                         currencySymbol: vm.displayCurrency == "EUR" ? "€" : "$",
+                        valuationStatus: .unvalued,
+                        valuedCount: 0,
+                        totalCount: 0,
                         isWaitingFirstSync: true
                     )
 

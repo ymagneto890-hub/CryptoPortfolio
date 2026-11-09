@@ -1,0 +1,65 @@
+name: Build iOS App
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode Version
+        run: |
+          if [ -d "/Applications/Xcode_16.1.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.1.app
+          elif [ -d "/Applications/Xcode_16.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.0.app
+          fi
+          echo "Xcode seleccionado:"
+          xcodebuild -version
+
+      - name: Install Pinned XcodeGen (2.42.0)
+        run: |
+          XCODEGEN_VER="2.42.0"
+          curl -Ls "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VER}/xcodegen.zip" -o xcodegen.zip
+          unzip -q xcodegen.zip
+          cd xcodegen && sudo ./install.sh && cd ..
+          rm -rf xcodegen xcodegen.zip
+          xcodegen --version
+
+      - name: Generate Xcode Project
+        run: xcodegen generate
+
+      - name: Build Pure Native iOS IPA
+        run: |
+          xcodebuild -project AppCore.xcodeproj \
+            -scheme AppCore \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath AppCore.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+          cp AppCore/Icon-60@2x.png AppCore.xcarchive/Products/Applications/AppCore.app/
+          cp AppCore/Icon-60@3x.png AppCore.xcarchive/Products/Applications/AppCore.app/
+
+          mkdir -p Payload
+          cp -r AppCore.xcarchive/Products/Applications/AppCore.app Payload/
+          zip -r CryptoPortfolio.ipa Payload
+
+          echo "=== MEDICIÓN DE TAMAÑO ==="
+          ls -lh Payload/AppCore.app/AppCore
+          du -sh Payload/AppCore.app
+          ls -lh CryptoPortfolio.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CryptoPortfolio-IPA
+          path: CryptoPortfolio.ipa

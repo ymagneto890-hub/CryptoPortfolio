@@ -1,6 +1,13 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Estado de Valoración de la Cartera
+public enum ValuationStatus: String, Codable, Equatable {
+    case complete = "complete"      // Todos los activos tienen cotización verificada y reciente
+    case partial = "partial"        // Solo algunos activos tienen cotización verificada
+    case unvalued = "unvalued"      // Ningún activo tiene cotización de mercado verificada
+}
+
 // MARK: - Modelos de Datos del Portafolio (100% Anónimos en Git)
 
 public struct RawPosition: Codable, Equatable {
@@ -21,12 +28,27 @@ public struct MarketQuote: Codable, Equatable {
     public let price: Double
     public let currency: String   // e.g. "USD", "EUR", "GBP", "GBp"
     public let timestamp: Date
+    public let source: String     // e.g. "binance", "yahoo"
 
-    public init(symbol: String, price: Double, currency: String, timestamp: Date = Date()) {
+    public init(symbol: String, price: Double, currency: String, timestamp: Date = Date(), source: String = "unknown") {
         self.symbol = symbol
         self.price = price
         self.currency = currency
         self.timestamp = timestamp
+        self.source = source
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, price, currency, timestamp, source
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        price = try container.decode(Double.self, forKey: .price)
+        currency = try container.decode(String.self, forKey: .currency)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "unknown"
     }
 }
 
@@ -35,9 +57,12 @@ public struct PortfolioPayload: Codable, Equatable {
     public var currency: String
     public var currency_symbol: String
     public var total_invested: Double
-    public var total_value: Double
-    public var total_pnl: Double
-    public var total_pnl_pct: Double
+    public var total_value: Double?
+    public var total_pnl: Double?
+    public var total_pnl_pct: Double?
+    public var valuation_status: ValuationStatus
+    public var valued_count: Int
+    public var total_count: Int
     public var items: [PortfolioItem]
     public var positions: [RawPosition]?
 
@@ -46,9 +71,12 @@ public struct PortfolioPayload: Codable, Equatable {
         currency: String = "EUR",
         currency_symbol: String = "€",
         total_invested: Double = 0.0,
-        total_value: Double = 0.0,
-        total_pnl: Double = 0.0,
-        total_pnl_pct: Double = 0.0,
+        total_value: Double? = nil,
+        total_pnl: Double? = nil,
+        total_pnl_pct: Double? = nil,
+        valuation_status: ValuationStatus = .unvalued,
+        valued_count: Int = 0,
+        total_count: Int = 0,
         items: [PortfolioItem] = [],
         positions: [RawPosition]? = nil
     ) {
@@ -59,8 +87,33 @@ public struct PortfolioPayload: Codable, Equatable {
         self.total_value = total_value
         self.total_pnl = total_pnl
         self.total_pnl_pct = total_pnl_pct
+        self.valuation_status = valuation_status
+        self.valued_count = valued_count
+        self.total_count = total_count
         self.items = items
         self.positions = positions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case updated_at, currency, currency_symbol, total_invested, total_value
+        case total_pnl, total_pnl_pct, valuation_status, valued_count, total_count
+        case items, positions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        updated_at = try container.decodeIfPresent(String.self, forKey: .updated_at) ?? ""
+        currency = try container.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"
+        currency_symbol = try container.decodeIfPresent(String.self, forKey: .currency_symbol) ?? "€"
+        total_invested = try container.decodeIfPresent(Double.self, forKey: .total_invested) ?? 0.0
+        total_value = try container.decodeIfPresent(Double.self, forKey: .total_value)
+        total_pnl = try container.decodeIfPresent(Double.self, forKey: .total_pnl)
+        total_pnl_pct = try container.decodeIfPresent(Double.self, forKey: .total_pnl_pct)
+        valuation_status = try container.decodeIfPresent(ValuationStatus.self, forKey: .valuation_status) ?? .unvalued
+        valued_count = try container.decodeIfPresent(Int.self, forKey: .valued_count) ?? 0
+        total_count = try container.decodeIfPresent(Int.self, forKey: .total_count) ?? 0
+        items = try container.decodeIfPresent([PortfolioItem].self, forKey: .items) ?? []
+        positions = try container.decodeIfPresent([RawPosition].self, forKey: .positions)
     }
 }
 
@@ -71,9 +124,9 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
     public let icon: String
     public let color: String
     public var invested: Double
-    public var value: Double
-    public var pnl: Double
-    public var pnl_pct: Double
+    public var value: Double?
+    public var pnl: Double?
+    public var pnl_pct: Double?
     public var share_pct: Double
     public var current_price: Double?
 
@@ -83,10 +136,10 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
         icon: String,
         color: String,
         invested: Double,
-        value: Double,
-        pnl: Double,
-        pnl_pct: Double,
-        share_pct: Double,
+        value: Double? = nil,
+        pnl: Double? = nil,
+        pnl_pct: Double? = nil,
+        share_pct: Double = 0.0,
         current_price: Double? = nil
     ) {
         self.symbol = symbol
@@ -99,6 +152,24 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
         self.pnl_pct = pnl_pct
         self.share_pct = share_pct
         self.current_price = current_price
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, name, icon, color, invested, value, pnl, pnl_pct, share_pct, current_price
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        name = try container.decode(String.self, forKey: .name)
+        icon = try container.decode(String.self, forKey: .icon)
+        color = try container.decode(String.self, forKey: .color)
+        invested = try container.decodeIfPresent(Double.self, forKey: .invested) ?? 0.0
+        value = try container.decodeIfPresent(Double.self, forKey: .value)
+        pnl = try container.decodeIfPresent(Double.self, forKey: .pnl)
+        pnl_pct = try container.decodeIfPresent(Double.self, forKey: .pnl_pct)
+        share_pct = try container.decodeIfPresent(Double.self, forKey: .share_pct) ?? 0.0
+        current_price = try container.decodeIfPresent(Double.self, forKey: .current_price)
     }
 
     public var uiColor: Color {

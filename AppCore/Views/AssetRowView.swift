@@ -39,7 +39,7 @@ public struct AssetRowView: View {
                 )
 
             VStack(alignment: .leading, spacing: 6) {
-                // Fila 1: Punto de color + Símbolo + Badge de rendimiento (+15.4%)
+                // Fila 1: Punto de color + Símbolo + Badge de rendimiento (+15.4% o —)
                 HStack(spacing: 5) {
                     Circle()
                         .fill(item.uiColor)
@@ -52,14 +52,14 @@ public struct AssetRowView: View {
 
                     Spacer(minLength: 2)
 
-                    if let lp = item.current_price, lp > 0 {
-                        Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
+                    if let pct = item.pnl_pct {
+                        Text(String(format: "%@%.1f%%", pct >= 0 ? "+" : "", pct))
                             .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
+                            .foregroundColor(pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(
-                                (item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
+                                (pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
                                     .opacity(0.40)
                             )
                             .clipShape(Capsule())
@@ -72,10 +72,9 @@ public struct AssetRowView: View {
                             .background(Color(white: 0.2).opacity(0.4))
                             .clipShape(Capsule())
                     }
-
                 }
 
-                // Fila 2: Precio actual de mercado en grande y limpio (o — si no hay cotización)
+                // Fila 2: Precio actual de mercado en grande (o — si no existe cotización válida)
                 Text(formattedPrice(item.current_price))
                     .font(.system(size: 17, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)

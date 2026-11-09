@@ -3,10 +3,13 @@ import SwiftUI
 // MARK: - Gráfica Redonda XL Interactiva para iPhone SE (4 pulgadas)
 public struct DonutChartView: View {
     public let items: [PortfolioItem]
-    public let totalValue: Double
-    public let totalPnl: Double
-    public let totalPnlPct: Double
+    public let totalValue: Double?
+    public let totalPnl: Double?
+    public let totalPnlPct: Double?
     public let currencySymbol: String
+    public let valuationStatus: ValuationStatus
+    public let valuedCount: Int
+    public let totalCount: Int
     public let selectedSymbol: String?
     public let isWaitingFirstSync: Bool
     public var onCenterTap: (() -> Void)? = nil
@@ -16,10 +19,13 @@ public struct DonutChartView: View {
 
     public init(
         items: [PortfolioItem],
-        totalValue: Double,
-        totalPnl: Double = 0,
-        totalPnlPct: Double,
+        totalValue: Double?,
+        totalPnl: Double? = nil,
+        totalPnlPct: Double? = nil,
         currencySymbol: String,
+        valuationStatus: ValuationStatus = .complete,
+        valuedCount: Int = 0,
+        totalCount: Int = 0,
         selectedSymbol: String? = nil,
         isWaitingFirstSync: Bool = false,
         onCenterTap: (() -> Void)? = nil
@@ -29,6 +35,9 @@ public struct DonutChartView: View {
         self.totalPnl = totalPnl
         self.totalPnlPct = totalPnlPct
         self.currencySymbol = currencySymbol
+        self.valuationStatus = valuationStatus
+        self.valuedCount = valuedCount
+        self.totalCount = totalCount
         self.selectedSymbol = selectedSymbol
         self.isWaitingFirstSync = isWaitingFirstSync
         self.onCenterTap = onCenterTap
@@ -68,7 +77,7 @@ public struct DonutChartView: View {
                     .stroke(Color(white: 0.11), lineWidth: lineWidth)
                     .frame(width: size, height: size)
 
-                // Segmentos de cada activo
+                // Segmentos de cada activo con distribución real
                 ForEach(Array(slices.enumerated()), id: \.offset) { _, slice in
                     let isDimmed = (selectedSymbol != nil && selectedSymbol != slice.symbol)
                     DonutSliceShape(startAngle: slice.startAngle, endAngle: slice.endAngle)
@@ -91,24 +100,30 @@ public struct DonutChartView: View {
                                 .foregroundColor(item.uiColor)
                         }
 
-                        Text(formattedValue(item.value))
-                            .font(.system(size: 27, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                            .minimumScaleFactor(0.65)
-                            .lineLimit(1)
+                        if let val = item.value {
+                            Text(formattedValue(val))
+                                .font(.system(size: 27, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                                .minimumScaleFactor(0.65)
+                                .lineLimit(1)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 27, weight: .heavy, design: .rounded))
+                                .foregroundColor(Color(white: 0.6))
+                        }
 
                         Text("Inv: \(formattedValue(item.invested))")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(Color(white: 0.68))
 
-                        if let lp = item.current_price, lp > 0 {
-                            Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
+                        if let pct = item.pnl_pct {
+                            Text(String(format: "%@%.1f%%", pct >= 0 ? "+" : "", pct))
                                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
+                                .foregroundColor(pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
                                 .background(
-                                    (item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
+                                    (pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
                                         .opacity(0.45)
                                 )
                                 .clipShape(Capsule())
@@ -134,30 +149,60 @@ public struct DonutChartView: View {
                             .tracking(1.4)
                             .foregroundColor(Color(white: 0.6))
 
-                        Text(formattedValue(totalValue))
-                            .font(.system(size: 28, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                            .minimumScaleFactor(0.65)
-                            .lineLimit(1)
-
-                        HStack(spacing: 3) {
-                            Text(String(format: "%@%@ (%@%.1f%%)",
-                                        totalPnl >= 0 ? "+" : "-",
-                                        formattedValue(abs(totalPnl)),
-                                        totalPnlPct >= 0 ? "+" : "",
-                                        totalPnlPct))
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                        if let tVal = totalValue {
+                            Text(formattedValue(tVal))
+                                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                                .minimumScaleFactor(0.65)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.75)
+                        } else {
+                            Text("—")
+                                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                                .foregroundColor(Color(white: 0.6))
                         }
-                        .foregroundColor(totalPnlPct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(
-                            (totalPnlPct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
-                                .opacity(0.45)
-                        )
-                        .clipShape(Capsule())
+
+                        // Badge inferior: Distingue rigurosamente Complete, Partial y Unvalued
+                        switch valuationStatus {
+                        case .complete:
+                            if let pnl = totalPnl, let pct = totalPnlPct {
+                                HStack(spacing: 3) {
+                                    Text(String(format: "%@%@ (%@%.1f%%)",
+                                                pnl >= 0 ? "+" : "-",
+                                                formattedValue(abs(pnl)),
+                                                pct >= 0 ? "+" : "",
+                                                pct))
+                                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
+                                }
+                                .foregroundColor(pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(
+                                    (pct >= 0 ? Color(red: 0.0, green: 0.45, blue: 0.22) : Color(red: 0.45, green: 0.1, blue: 0.1))
+                                        .opacity(0.45)
+                                )
+                                .clipShape(Capsule())
+                            }
+
+                        case .partial:
+                            Text("Parcial (\(valuedCount)/\(totalCount))")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.28))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(Color(red: 0.4, green: 0.3, blue: 0.08).opacity(0.45))
+                                .clipShape(Capsule())
+
+                        case .unvalued:
+                            Text("Sin cotización")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundColor(Color(white: 0.65))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 4)
+                                .background(Color(white: 0.2).opacity(0.45))
+                                .clipShape(Capsule())
+                        }
                     }
                     .frame(width: size - (lineWidth * 2) - 8)
                 }
