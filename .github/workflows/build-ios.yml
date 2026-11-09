@@ -3,6 +3,8 @@ name: Build CryptoPortfolio iOS IPA
 on:
   push:
     branches:
+      - main
+      - master
       - fix/portfolio-reliability-audit
     tags:
       - "v*"
