@@ -8,6 +8,8 @@ public struct SettingsView: View {
     @State private var inputPort: String = ""
     @State private var inputToken: String = ""
     @State private var showToken: Bool = false
+    @State private var showingSaveError: Bool = false
+    @State private var saveErrorMessage: String = ""
 
     public init(vm: PortfolioViewModel) {
         self.vm = vm
@@ -98,8 +100,18 @@ public struct SettingsView: View {
 
                 // Botón Guardar y Sincronizar
                 Button(action: {
+                    let cleanToken = inputToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cleanToken.isEmpty else {
+                        saveErrorMessage = "Introduce el token de acceso del servidor."
+                        showingSaveError = true
+                        return
+                    }
+                    guard KeychainHelper.saveToken(cleanToken) else {
+                        saveErrorMessage = "No se pudo guardar el token en el Keychain. El token anterior se ha conservado."
+                        showingSaveError = true
+                        return
+                    }
                     vm.saveConnectionSettings(host: inputHost, port: inputPort)
-                    KeychainHelper.saveToken(inputToken)
                     vm.performSync(isManual: true)
                     presentationMode.wrappedValue.dismiss()
                 }) {
@@ -124,6 +136,11 @@ public struct SettingsView: View {
                 Spacer()
             }
             .padding(.horizontal, 16)
+        }
+        .alert("No se pudo guardar", isPresented: $showingSaveError) {
+            Button("Aceptar", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage)
         }
     }
 }

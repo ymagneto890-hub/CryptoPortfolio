@@ -45,13 +45,9 @@ public enum KeychainHelper {
             let addStatus = SecItemAdd(newItem as CFDictionary, nil)
             return addStatus == errSecSuccess
         default:
-            // Si ocurrió otro error (ej: colisión o estado inconsistente), borrar y reintentar adición limpia
-            SecItemDelete(query as CFDictionary)
-            var newItem = query
-            newItem[kSecValueData as String] = data
-            newItem[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let retryAddStatus = SecItemAdd(newItem as CFDictionary, nil)
-            return retryAddStatus == errSecSuccess
+            // Preserve the existing Keychain item on unexpected errors.
+            // Deleting it here could permanently lose a valid token if the retry also fails.
+            return false
         }
     }
 

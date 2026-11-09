@@ -11,6 +11,7 @@ public final class PortfolioViewModel: ObservableObject {
     @Published public var isUpdatingPrices: Bool = false
     @Published public var statusText: String = "Listo"
     @Published public var hasSyncedOnce: Bool = false
+    @Published public var isConnectedToPC: Bool = false
     @Published public var pcHost: String = "192.168.1.128"
     @Published public var pcPort: String = "8765"
     @Published public var lastLiveUpdateDate: Date? = nil
@@ -288,6 +289,7 @@ public final class PortfolioViewModel: ObservableObject {
 
         guard isValidHost(cleanHost), let portInt = Int(cleanPort), (1...65535).contains(portInt) else {
             DispatchQueue.main.async {
+                self.isConnectedToPC = false
                 self.statusText = "IP o puerto no válido"
             }
             return
@@ -295,6 +297,7 @@ public final class PortfolioViewModel: ObservableObject {
 
         guard let url = URL(string: "http://\(cleanHost):\(cleanPort)/api/portfolio") else {
             DispatchQueue.main.async {
+                self.isConnectedToPC = false
                 self.statusText = "URL no válida"
             }
             return
@@ -336,6 +339,7 @@ public final class PortfolioViewModel: ObservableObject {
                 }
                 guard self.isAppActive, thisSyncGen == self.currentSyncGen else { return }
 
+                self.isConnectedToPC = false
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode == 401 {
                         self.statusText = "Error: Token PC no autorizado (401)"
@@ -343,9 +347,22 @@ public final class PortfolioViewModel: ObservableObject {
                     }
 
                     if httpResponse.statusCode == 200, let data = data, error == nil {
+                        // Reject server error objects before decoding: model defaults could otherwise
+                        // turn {"error": "..."} into a seemingly valid empty portfolio.
+                        let hasValidEnvelope: Bool = {
+                            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                  object["error"] == nil,
+                                  object["currency"] is String,
+                                  object["items"] is [Any],
+                                  object["positions"] is [Any] else {
+                                return false
+                            }
+                            return true
+                        }()
+
                         let decoder = JSONDecoder()
-                        if var newPayload = try? decoder.decode(PortfolioPayload.self, from: data),
-                           !newPayload.items.isEmpty || !(newPayload.positions ?? []).isEmpty {
+                        if hasValidEnvelope, var newPayload = try? decoder.decode(PortfolioPayload.self, from: data) {
+                            // Empty arrays are a valid portfolio state (for example, after removing every position).
                             // Cero cotizaciones ficticias: limpiar precios no verificados recibidos del servidor
                             for i in 0..<newPayload.items.count {
                                 newPayload.items[i].current_price = nil
@@ -360,6 +377,7 @@ public final class PortfolioViewModel: ObservableObject {
 
                             self.portfolio = newPayload
                             self.hasSyncedOnce = true
+                            self.isConnectedToPC = true
                             self.statusText = "Sincronizado con PC"
                             self.saveToCache(newPayload)
                             UserDefaults.standard.set(Date(), forKey: Keys.lastSyncSuccess)

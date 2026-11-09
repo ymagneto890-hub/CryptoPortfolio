@@ -21,7 +21,7 @@ public struct ContentView: View {
                 // MARK: - Barra Superior Minimalista (Solo iconos limpios)
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(vm.hasSyncedOnce ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color.orange)
+                        .fill(vm.isConnectedToPC ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color.orange)
                         .frame(width: 8, height: 8)
 
                     Text("PORTAFOLIO")
