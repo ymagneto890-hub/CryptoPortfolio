@@ -76,6 +76,9 @@ public final class PortfolioViewModel: ObservableObject {
                     item.invested = round2(convertAmount(item.invested, from: srcCurr, to: newCurr))
                     item.value = round2(convertAmount(item.value, from: srcCurr, to: newCurr))
                     item.pnl = round2(convertAmount(item.pnl, from: srcCurr, to: newCurr))
+                    if let p = item.current_price {
+                        item.current_price = convertAmount(p, from: srcCurr, to: newCurr)
+                    }
                     updatedItems.append(item)
                 }
                 current.items = updatedItems
@@ -169,6 +172,9 @@ public final class PortfolioViewModel: ObservableObject {
                                 item.invested = self.round2(self.convertAmount(item.invested, from: src, to: dst))
                                 item.value = self.round2(self.convertAmount(item.value, from: src, to: dst))
                                 item.pnl = self.round2(self.convertAmount(item.pnl, from: src, to: dst))
+                                if let p = item.current_price {
+                                    item.current_price = self.convertAmount(p, from: src, to: dst)
+                                }
                                 updatedItems.append(item)
                             }
                             newPayload.items = updatedItems
@@ -254,6 +260,7 @@ public final class PortfolioViewModel: ObservableObject {
             var coinInvestedMap: [String: Double] = [:]
             var coinValMap: [String: Double] = [:]
             var coinMetaMap: [String: RawPosition] = [:]
+            var coinPriceMap: [String: Double] = [:]
 
             for pos in positions {
                 coinMetaMap[pos.coin] = pos
@@ -264,6 +271,7 @@ public final class PortfolioViewModel: ObservableObject {
                 if let rawUsdPrice = fetchedPricesUSD[pos.coin] {
                     livePriceInTarget = self.convertAmount(rawUsdPrice, from: "USD", to: targetCurr)
                 }
+                coinPriceMap[pos.coin] = livePriceInTarget
 
                 let curVal = (ep > 0) ? (inv * (livePriceInTarget / ep)) : inv
 
@@ -285,6 +293,7 @@ public final class PortfolioViewModel: ObservableObject {
                 let pnlPct = (inv > 0) ? ((pnl / inv) * 100.0) : 0.0
                 let sharePct = (totalCurrentVal > 0) ? ((curVal / totalCurrentVal) * 100.0) : 0.0
                 let meta = coinMetaMap[ck]
+                let livePrice = coinPriceMap[ck] ?? 0.0
 
                 newItems.append(PortfolioItem(
                     symbol: ck,
@@ -295,7 +304,8 @@ public final class PortfolioViewModel: ObservableObject {
                     value: self.round2(curVal),
                     pnl: self.round2(pnl),
                     pnl_pct: self.round2(pnlPct),
-                    share_pct: (sharePct * 10).rounded() / 10
+                    share_pct: (sharePct * 10).rounded() / 10,
+                    current_price: livePrice
                 ))
             }
 

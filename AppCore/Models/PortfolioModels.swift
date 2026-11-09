@@ -61,6 +61,7 @@ public struct PortfolioItem: Identifiable, Codable {
     public var pnl: Double
     public var pnl_pct: Double
     public var share_pct: Double
+    public var current_price: Double?
 
     public init(
         symbol: String,
@@ -71,7 +72,8 @@ public struct PortfolioItem: Identifiable, Codable {
         value: Double,
         pnl: Double,
         pnl_pct: Double,
-        share_pct: Double
+        share_pct: Double,
+        current_price: Double? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -82,6 +84,7 @@ public struct PortfolioItem: Identifiable, Codable {
         self.pnl = pnl
         self.pnl_pct = pnl_pct
         self.share_pct = share_pct
+        self.current_price = current_price
     }
 
     public var uiColor: Color {
