@@ -33,14 +33,16 @@ public final class PortfolioViewModel: ObservableObject {
 
     // MARK: - Control de Temporizadores y Concurrencia
     private var priceTimer: Timer?
-    // Optimización de batería: ciclo predeterminado de 120 segundos
-    private let autoUpdateInterval: TimeInterval = 120.0
+    // Battery/network efficiency: refresh every five minutes while the app is foregrounded.
+    // Manual refresh remains immediate and background refreshes are stopped by scene lifecycle.
+    private let autoUpdateInterval: TimeInterval = 300.0
 
     private var currentUpdateId: Int = 0
     private var currentSyncGen: Int = 0
     private var pendingRefreshRequested: Bool = false
     private var activeDataTasks: Set<URLSessionDataTask> = []
     private let tasksLock = NSLock()
+    private let startsAutomatically: Bool
 
     // MARK: - Tipos de Cambio Reales y Antigüedad Máxima
     public var eurUsdRate: Double? = nil
@@ -57,7 +59,8 @@ public final class PortfolioViewModel: ObservableObject {
     // Diccionario de cotizaciones verificadas (acceso serializado en DispatchQueue.main)
     public var lastKnownQuotes: [String: MarketQuote] = [:]
 
-    public init() {
+    public init(startAutomatically: Bool = true) {
+        self.startsAutomatically = startAutomatically
         let defaults = UserDefaults.standard
 
         if let savedHost = defaults.string(forKey: Keys.pcHost), !savedHost.isEmpty {
@@ -96,9 +99,11 @@ public final class PortfolioViewModel: ObservableObject {
         loadCachedQuotes()
         loadCachedData()
 
-        // Iniciar en primer plano
-        startForegroundUpdates()
-        refreshImmediate()
+        // Production starts updates normally; tests can opt out of timers and network requests.
+        if startAutomatically {
+            startForegroundUpdates()
+            refreshImmediate()
+        }
     }
 
     deinit {
@@ -108,6 +113,7 @@ public final class PortfolioViewModel: ObservableObject {
     // MARK: - Ciclo de Vida de iOS (Foreground / Background)
     public func applicationDidBecomeActive() {
         isAppActive = true
+        guard startsAutomatically else { return }
         startForegroundUpdates()
         refreshImmediate()
     }
@@ -448,11 +454,12 @@ public final class PortfolioViewModel: ObservableObject {
 
         // 1. Obtener tipo de cambio EUR/USD real (Yahoo Finance EURUSD=X tasa FX oficial fiduciaria)
         group.enter()
-        fetchRealEurUsdRate(updateId: thisUpdateId) { rate, date in
-            if let r = rate, r.isFinite, !r.isNaN, r > 0 {
+        fetchRealEurUsdRate(updateId: thisUpdateId) { [weak self] rate, date in
+            if let self = self, let r = rate, let d = date,
+               self.isExchangeRateUsable(r, date: d, now: Date()) {
                 localLock.lock()
                 fetchedEurUsdRate = r
-                fetchedEurUsdDate = date ?? Date()
+                fetchedEurUsdDate = d
                 localLock.unlock()
             }
             group.leave()
@@ -466,11 +473,12 @@ public final class PortfolioViewModel: ObservableObject {
 
         if portfolioNeedsGbp {
             group.enter()
-            fetchRealGbpUsdRate(updateId: thisUpdateId) { rate, date in
-                if let r = rate, r.isFinite, !r.isNaN, r > 0 {
+            fetchRealGbpUsdRate(updateId: thisUpdateId) { [weak self] rate, date in
+                if let self = self, let r = rate, let d = date,
+                   self.isExchangeRateUsable(r, date: d, now: Date()) {
                     localLock.lock()
                     fetchedGbpUsdRate = r
-                    fetchedGbpUsdDate = date ?? Date()
+                    fetchedGbpUsdDate = d
                     localLock.unlock()
                 }
                 group.leave()
@@ -528,22 +536,32 @@ public final class PortfolioViewModel: ObservableObject {
             self.isUpdatingPrices = false
             self.lastLiveUpdateDate = Date()
 
-            // Aplicar tipos de cambio solo si fueron recibidos válidos y finitos
-            if let eurRate = fetchedEurUsdRate, eurRate.isFinite, !eurRate.isNaN, eurRate > 0 {
+            // Apply rates only when both value and source timestamp are valid.
+            // A bad rate must not abort the rest of the quote update.
+            if let eurRate = fetchedEurUsdRate,
+               let rateDate = fetchedEurUsdDate,
+               self.isExchangeRateUsable(eurRate, date: rateDate, now: Date()) {
                 self.eurUsdRate = eurRate
-                self.eurUsdRateDate = fetchedEurUsdDate ?? Date()
+                self.eurUsdRateDate = rateDate
                 UserDefaults.standard.set(eurRate, forKey: Keys.lastEurUsdRate)
-                UserDefaults.standard.set(self.eurUsdRateDate, forKey: Keys.lastEurRateDate)
+                UserDefaults.standard.set(rateDate, forKey: Keys.lastEurRateDate)
             }
-            if let gbpRate = fetchedGbpUsdRate, gbpRate.isFinite, !gbpRate.isNaN, gbpRate > 0 {
+            if let gbpRate = fetchedGbpUsdRate,
+               let rateDate = fetchedGbpUsdDate,
+               self.isExchangeRateUsable(gbpRate, date: rateDate, now: Date()) {
                 self.gbpUsdRate = gbpRate
-                self.gbpUsdRateDate = fetchedGbpUsdDate ?? Date()
+                self.gbpUsdRateDate = rateDate
                 UserDefaults.standard.set(gbpRate, forKey: Keys.lastGbpUsdRate)
-                UserDefaults.standard.set(self.gbpUsdRateDate, forKey: Keys.lastGbpRateDate)
+                UserDefaults.standard.set(rateDate, forKey: Keys.lastGbpRateDate)
             }
 
-            // Aplicar cotizaciones frescas preservando timestamps más recientes
+            // Persist only usable quotes. An unverified Yahoo timestamp must not replace
+            // an older, still-valid cached quote.
             for (coin, freshQuote) in freshlyFetchedQuotes {
+                guard self.isQuotePriceValid(freshQuote.price),
+                      self.isQuoteTimestampValid(freshQuote, now: Date()) else {
+                    continue
+                }
                 if let existing = self.lastKnownQuotes[coin] {
                     if freshQuote.timestamp >= existing.timestamp {
                         self.lastKnownQuotes[coin] = freshQuote
@@ -618,6 +636,11 @@ public final class PortfolioViewModel: ObservableObject {
                     break
                 }
                 coinTotalInvTarget += invInTarget
+                guard coinTotalInvTarget.isFinite else {
+                    conversionFailed = true
+                    allCurrenciesConvertible = false
+                    break
+                }
 
                 // Cálculo matemático exacto de unidades: quantity = invested / entry_price
                 // usando los datos originales de la posición
@@ -625,6 +648,9 @@ public final class PortfolioViewModel: ObservableObject {
                     let qty = pos.invested / rawEp
                     if qty.isFinite && !qty.isNaN && qty > 0 {
                         coinTotalQuantity += qty
+                        if !coinTotalQuantity.isFinite {
+                            hasCompleteQuantities = false
+                        }
                     } else {
                         hasCompleteQuantities = false
                     }
@@ -655,8 +681,10 @@ public final class PortfolioViewModel: ObservableObject {
                         coinLivePriceInTarget[coin] = convertedPrice
                         // Valor actual exacto: currentValue = totalQuantity * currentMarketPriceTarget
                         let val = coinTotalQuantity * convertedPrice
-                        coinValueInTarget[coin] = val
-                        coinHasValidValuation[coin] = true
+                        if val.isFinite, val > 0 {
+                            coinValueInTarget[coin] = val
+                            coinHasValidValuation[coin] = true
+                        }
                     }
                 }
             }
@@ -748,13 +776,15 @@ public final class PortfolioViewModel: ObservableObject {
                 pnl: pnl,
                 pnl_pct: pnlPct,
                 share_pct: (sharePct * 10).rounded() / 10,
-                current_price: livePrice
+                current_price: livePrice,
+                investmentConversionAvailable: coinInvestedInTarget[ck] != nil
             ))
         }
 
         current.currency = targetCurrency
         current.currency_symbol = targetSym
         current.total_invested = round2(totalInvestedAll)
+        current.investmentTotalIsComplete = allCurrenciesConvertible
         current.total_value = totalValue
         current.total_pnl = totalPnl
         current.total_pnl_pct = totalPnlPct
@@ -795,6 +825,19 @@ public final class PortfolioViewModel: ObservableObject {
         return false
     }
 
+    private func finitePositiveResult(_ value: Double) -> Double? {
+        value.isFinite && value > 0 ? value : nil
+    }
+
+    private func isExchangeRateUsable(_ value: Double?, date: Date?, now: Date) -> Bool {
+        guard let value = value, let date = date,
+              value.isFinite, value > 0 else {
+            return false
+        }
+        let age = now.timeIntervalSince(date)
+        return age >= 0 && age < maxRateAgeSeconds
+    }
+
     // MARK: - Conversión Exacta de Divisas (EUR, USD, GBP, GBp, USDT)
     public func convertAmount(_ amount: Double, from src: String, to dst: String, now: Date = Date()) -> Double? {
         guard amount.isFinite, !amount.isNaN, amount > 0 else { return nil }
@@ -820,40 +863,38 @@ public final class PortfolioViewModel: ObservableObject {
 
         // Comprobación continua de antigüedad de tipos de cambio (< 48 horas)
         if s == "USD" && d == "EUR" {
-            guard let rate = eurUsdRate, rate.isFinite, !rate.isNaN, rate > 0,
-                  let rDate = eurUsdRateDate, now.timeIntervalSince(rDate) < maxRateAgeSeconds else { return nil }
-            return val / rate
+            guard isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let rate = eurUsdRate else { return nil }
+            return finitePositiveResult(val / rate)
         }
         if s == "EUR" && d == "USD" {
-            guard let rate = eurUsdRate, rate.isFinite, !rate.isNaN, rate > 0,
-                  let rDate = eurUsdRateDate, now.timeIntervalSince(rDate) < maxRateAgeSeconds else { return nil }
-            return val * rate
+            guard isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let rate = eurUsdRate else { return nil }
+            return finitePositiveResult(val * rate)
         }
 
         if s == "GBP" && d == "USD" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0,
-                  let gDate = gbpUsdRateDate, now.timeIntervalSince(gDate) < maxRateAgeSeconds else { return nil }
-            return val * gRate
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  let gRate = gbpUsdRate else { return nil }
+            return finitePositiveResult(val * gRate)
         }
         if s == "USD" && d == "GBP" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0,
-                  let gDate = gbpUsdRateDate, now.timeIntervalSince(gDate) < maxRateAgeSeconds else { return nil }
-            return val / gRate
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  let gRate = gbpUsdRate else { return nil }
+            return finitePositiveResult(val / gRate)
         }
 
         if s == "GBP" && d == "EUR" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0, let gDate = gbpUsdRateDate,
-                  let eRate = eurUsdRate, eRate.isFinite, !eRate.isNaN, eRate > 0, let eDate = eurUsdRateDate,
-                  now.timeIntervalSince(gDate) < maxRateAgeSeconds,
-                  now.timeIntervalSince(eDate) < maxRateAgeSeconds else { return nil }
-            return (val * gRate) / eRate
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let gRate = gbpUsdRate, let eRate = eurUsdRate else { return nil }
+            return finitePositiveResult((val * gRate) / eRate)
         }
         if s == "EUR" && d == "GBP" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0, let gDate = gbpUsdRateDate,
-                  let eRate = eurUsdRate, eRate.isFinite, !eRate.isNaN, eRate > 0, let eDate = eurUsdRateDate,
-                  now.timeIntervalSince(gDate) < maxRateAgeSeconds,
-                  now.timeIntervalSince(eDate) < maxRateAgeSeconds else { return nil }
-            return (val * eRate) / gRate
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let gRate = gbpUsdRate, let eRate = eurUsdRate else { return nil }
+            return finitePositiveResult((val * eRate) / gRate)
         }
 
         return nil
@@ -869,6 +910,36 @@ public final class PortfolioViewModel: ObservableObject {
         (val * 100).rounded() / 100
     }
 
+    // Network callbacks may arrive on background queues. Serialize lifecycle/generation
+    // reads through the main queue; avoid main.sync when already on the main thread.
+    private func isCurrentUpdate(_ updateId: Int) -> Bool {
+        if Thread.isMainThread {
+            return isAppActive && updateId == currentUpdateId
+        }
+        return DispatchQueue.main.sync {
+            isAppActive && updateId == currentUpdateId
+        }
+    }
+
+    private func encodedBinanceSymbol(_ symbol: String) -> String? {
+        let normalized = symbol.uppercased()
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        guard !normalized.isEmpty,
+              normalized.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return nil
+        }
+        return normalized
+    }
+
+    private func encodedYahooSymbol(_ symbol: String) -> String? {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-^=_")
+        guard !symbol.isEmpty,
+              symbol.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return nil
+        }
+        return symbol.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+
     // MARK: - Clientes de Red Nativos Seguros (Cancelación Limpia y Generaciones)
 
     // Tipo de cambio EUR/USD: Yahoo Finance EURUSD=X (tasa FX real fiduciaria)
@@ -882,7 +953,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -891,25 +962,29 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let chart = root["chart"] as? [String: Any],
                let results = chart["result"] as? [[String: Any]],
                let first = results.first,
                let meta = first["meta"] as? [String: Any],
-               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0 {
-                let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map { TimeInterval($0) }
-                let rateDate = regTime.map { Date(timeIntervalSince1970: $0) } ?? Date()
-                completion(price, rateDate)
-                return
+               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0,
+               let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) {
+                let rateDate = Date(timeIntervalSince1970: regTime)
+                if isExchangeRateUsable(price, date: rateDate, now: Date()) {
+                    completion(price, rateDate)
+                    return
+                }
             }
 
-            // Fallback secundario a Binance EURUSDT (Aproximación USDT documentada)
+            // No substitute a missing market timestamp with the local receipt time.
+            // Fall back to the live Binance EURUSDT observation instead.
             self.fetchBinanceEurUsdFallback(updateId: updateId, completion: completion)
         }
 
@@ -920,7 +995,7 @@ public final class PortfolioViewModel: ObservableObject {
     }
 
     private func fetchBinanceEurUsdFallback(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard isAppActive, updateId == currentUpdateId else {
+        guard isCurrentUpdate(updateId) else {
             completion(nil, nil)
             return
         }
@@ -933,7 +1008,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 3.5
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -942,15 +1017,17 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let priceStr = json["price"] as? String,
                let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
+                // This is a local observation time from Binance ticker/price, not an exchange event timestamp.
                 completion(rate, Date())
                 return
             }
@@ -974,7 +1051,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -983,24 +1060,28 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let chart = root["chart"] as? [String: Any],
                let results = chart["result"] as? [[String: Any]],
                let first = results.first,
                let meta = first["meta"] as? [String: Any],
-               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0 {
-                let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map { TimeInterval($0) }
-                let rateDate = regTime.map { Date(timeIntervalSince1970: $0) } ?? Date()
-                completion(price, rateDate)
-                return
+               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0,
+               let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) {
+                let rateDate = Date(timeIntervalSince1970: regTime)
+                if isExchangeRateUsable(price, date: rateDate, now: Date()) {
+                    completion(price, rateDate)
+                    return
+                }
             }
 
+            // Missing or invalid Yahoo market time is not replaced with the local receipt time.
             self.fetchBinanceGbpUsdFallback(updateId: updateId, completion: completion)
         }
 
@@ -1011,7 +1092,7 @@ public final class PortfolioViewModel: ObservableObject {
     }
 
     private func fetchBinanceGbpUsdFallback(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard isAppActive, updateId == currentUpdateId else {
+        guard isCurrentUpdate(updateId) else {
             completion(nil, nil)
             return
         }
@@ -1024,7 +1105,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 3.5
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1033,12 +1114,13 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let priceStr = json["price"] as? String,
                let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
@@ -1056,7 +1138,13 @@ public final class PortfolioViewModel: ObservableObject {
 
     // Cotización de criptomonedas en Binance (Pares USDT)
     private func fetchBinancePrice(symbol: String, coin: String, updateId: Int, completion: @escaping (MarketQuote?) -> Void) {
-        guard let url = URL(string: "https://api.binance.com/api/v3/ticker/price?symbol=\(symbol)") else {
+        guard let safeSymbol = encodedBinanceSymbol(symbol),
+              var components = URLComponents(string: "https://api.binance.com/api/v3/ticker/price") else {
+            completion(nil)
+            return
+        }
+        components.queryItems = [URLQueryItem(name: "symbol", value: safeSymbol)]
+        guard let url = components.url else {
             completion(nil)
             return
         }
@@ -1064,7 +1152,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 4.0
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1073,12 +1161,13 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil)
                 return
             }
 
-            guard let data = data, error == nil,
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data, error == nil,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let priceStr = json["price"] as? String,
                   let price = Double(priceStr), price.isFinite, !price.isNaN, price > 0 else {
@@ -1087,7 +1176,7 @@ public final class PortfolioViewModel: ObservableObject {
             }
 
             // Moneda identificada como USDT (aproximación de mercado documentada frente a USD)
-            let quote = MarketQuote(symbol: coin, price: price, currency: "USDT", timestamp: Date(), source: "binance", isVerifiedTimestamp: true)
+            let quote = MarketQuote(symbol: coin, price: price, currency: "USDT", timestamp: Date(), source: "binance", isVerifiedTimestamp: false)
             completion(quote)
         }
 
@@ -1099,8 +1188,8 @@ public final class PortfolioViewModel: ObservableObject {
 
     // Cotización de activos tradicionales en Yahoo Finance
     private func fetchYahooPrice(symbol: String, coin: String, updateId: Int, completion: @escaping (MarketQuote?) -> Void) {
-        let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
-        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=15m&range=1d") else {
+        guard let encoded = encodedYahooSymbol(symbol),
+              let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=15m&range=1d") else {
             completion(nil)
             return
         }
@@ -1109,7 +1198,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1118,12 +1207,13 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil)
                 return
             }
 
-            guard let data = data, error == nil,
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data, error == nil,
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let chart = root["chart"] as? [String: Any],
                   let results = chart["result"] as? [[String: Any]],

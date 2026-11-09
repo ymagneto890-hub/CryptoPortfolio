@@ -10,6 +10,7 @@ public struct DonutChartView: View {
     public let valuationStatus: ValuationStatus
     public let valuedCount: Int
     public let totalCount: Int
+    public let investmentTotalIsComplete: Bool
     public let selectedSymbol: String?
     public let isWaitingFirstSync: Bool
     public var onCenterTap: (() -> Void)? = nil
@@ -26,6 +27,7 @@ public struct DonutChartView: View {
         valuationStatus: ValuationStatus = .complete,
         valuedCount: Int = 0,
         totalCount: Int = 0,
+        investmentTotalIsComplete: Bool = true,
         selectedSymbol: String? = nil,
         isWaitingFirstSync: Bool = false,
         onCenterTap: (() -> Void)? = nil
@@ -38,6 +40,7 @@ public struct DonutChartView: View {
         self.valuationStatus = valuationStatus
         self.valuedCount = valuedCount
         self.totalCount = totalCount
+        self.investmentTotalIsComplete = investmentTotalIsComplete
         self.selectedSymbol = selectedSymbol
         self.isWaitingFirstSync = isWaitingFirstSync
         self.onCenterTap = onCenterTap
@@ -63,11 +66,11 @@ public struct DonutChartView: View {
                         .font(.system(size: 32))
                         .foregroundColor(Color(red: 0.0, green: 0.85, blue: 0.85))
 
-                    Text("SIN DATOS")
+                    Text(isWaitingFirstSync ? "SIN DATOS" : "SIN POSICIONES")
                         .font(.system(size: 15, weight: .black, design: .rounded))
                         .foregroundColor(.white)
 
-                    Text("Pulsa actualizar 🔄")
+                    Text(isWaitingFirstSync ? "Pulsa actualizar 🔄" : "Añade activos desde tu PC")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(Color(white: 0.6))
                 }
@@ -95,7 +98,7 @@ public struct DonutChartView: View {
                             Circle()
                                 .fill(item.uiColor)
                                 .frame(width: 8, height: 8)
-                            Text("\(item.symbol) • \(String(format: "%.1f%%", item.share_pct))")
+                            Text(investmentTotalIsComplete ? "\(item.symbol) • \(String(format: "%.1f%%", item.share_pct))" : "\(item.symbol) • —")
                                 .font(.system(size: 12, weight: .black, design: .rounded))
                                 .foregroundColor(item.uiColor)
                         }
@@ -112,7 +115,7 @@ public struct DonutChartView: View {
                                 .foregroundColor(Color(white: 0.6))
                         }
 
-                        Text("Inv: \(formattedValue(item.invested))")
+                        Text(item.investmentConversionAvailable ? "Inv: \(formattedValue(item.invested))" : "Inv: —")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(Color(white: 0.68))
 
@@ -213,12 +216,16 @@ public struct DonutChartView: View {
         .frame(width: size + lineWidth + 6, height: size + lineWidth + 6)
     }
 
-    private func formattedValue(_ val: Double) -> String {
+    private static let currencyFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencySymbol = currencySymbol
         formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: val)) ?? "\(currencySymbol)\(Int(val))"
+        return formatter
+    }()
+
+    private func formattedValue(_ val: Double) -> String {
+        Self.currencyFormatter.currencySymbol = currencySymbol
+        return Self.currencyFormatter.string(from: NSNumber(value: val)) ?? "\(currencySymbol)\(Int(val))"
     }
 
     private struct SliceData {
@@ -229,6 +236,7 @@ public struct DonutChartView: View {
     }
 
     private var slices: [SliceData] {
+        guard investmentTotalIsComplete else { return [] }
         var result: [SliceData] = []
         var currentAngle: Double = -90.0
 

@@ -78,6 +78,7 @@ public struct ContentView: View {
                         valuationStatus: payload.valuation_status,
                         valuedCount: payload.valued_count,
                         totalCount: payload.total_count,
+                        investmentTotalIsComplete: payload.investmentTotalIsComplete,
                         selectedSymbol: vm.selectedSymbol,
                         isWaitingFirstSync: false,
                         onCenterTap: {
@@ -119,15 +120,15 @@ public struct ContentView: View {
                         valuationStatus: .unvalued,
                         valuedCount: 0,
                         totalCount: 0,
-                        isWaitingFirstSync: true
+                        isWaitingFirstSync: !vm.hasSyncedOnce
                     )
 
                     VStack(spacing: 8) {
-                        Text("Conecta con tu PC")
+                        Text(vm.hasSyncedOnce ? "Tu cartera está vacía" : "Conecta con tu PC")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
 
-                        Text("Pulsa el icono de actualizar arriba a la derecha para traer tus activos.")
+                        Text(vm.hasSyncedOnce ? "Añade tus posiciones desde el ordenador y vuelve a sincronizar." : "Pulsa el icono de actualizar arriba a la derecha para traer tus activos.")
                             .font(.system(size: 12))
                             .foregroundColor(Color(white: 0.6))
                             .multilineTextAlignment(.center)
