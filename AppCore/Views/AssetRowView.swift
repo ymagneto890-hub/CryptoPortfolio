@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Fila XL con Barra de Peso Integrada y Números Grandes (iPhone SE)
+// MARK: - Tarjeta Compacta para Cuadrícula de 2 Columnas (iPhone SE)
 public struct AssetRowView: View {
     public let item: PortfolioItem
     public let currencySymbol: String
@@ -20,83 +20,73 @@ public struct AssetRowView: View {
     }
 
     public var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                // Fondo base de la tarjeta
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(white: isSelected ? 0.15 : 0.095))
+        ZStack(alignment: .bottomLeading) {
+            // Fondo de la tarjeta
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(white: isSelected ? 0.15 : 0.095))
 
-                // Barra de progreso proporcional que rellena el hueco visual
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                item.uiColor.opacity(isSelected ? 0.30 : 0.18),
-                                item.uiColor.opacity(0.03)
-                            ]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+            // Brillo sutil del color del activo
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            item.uiColor.opacity(isSelected ? 0.28 : 0.14),
+                            Color.clear
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-                    .frame(width: max(36, geo.size.width * CGFloat(min(item.share_pct, 100.0) / 100.0)))
+                )
 
-                // Contenido principal de la fila
-                HStack(spacing: 10) {
-                    // Insignia circular de color
-                    ZStack {
-                        Circle()
-                            .fill(item.uiColor.opacity(0.24))
-                            .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 8) {
+                // Línea superior: Punto de color + Símbolo + % del portafolio
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(item.uiColor)
+                        .frame(width: 9, height: 9)
 
-                        Circle()
-                            .fill(item.uiColor)
-                            .frame(width: 11, height: 11)
-                    }
+                    Text(item.symbol)
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
 
-                    // Símbolo Grande + Porcentaje Grande
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(item.symbol)
-                            .font(.system(size: 18, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
+                    Spacer(minLength: 2)
 
-                        Text(String(format: "%.1f%%", item.share_pct))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundColor(item.uiColor)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(item.uiColor.opacity(0.16))
-                            .clipShape(Capsule())
-                    }
-
-                    Spacer(minLength: 4)
-
-                    // Valor actual gigante y PnL claro a la derecha
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text(formattedValue(item.value))
-                            .font(.system(size: 18, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-
-                        HStack(spacing: 3) {
-                            Text(String(format: "%@%@ (%@%.1f%%)",
-                                        item.pnl >= 0 ? "+" : "-",
-                                        formattedValue(abs(item.pnl)),
-                                        item.pnl_pct >= 0 ? "+" : "",
-                                        item.pnl_pct))
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
-                        }
-                    }
+                    Text(String(format: "%.1f%%", item.share_pct))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(item.uiColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(item.uiColor.opacity(0.16))
+                        .clipShape(Capsule())
                 }
-                .padding(.horizontal, 12)
+
+                // Línea inferior: Valor en grande + % Ganancia/Pérdida
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(formattedValue(item.value))
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+
+                    Spacer(minLength: 2)
+
+                    Text(String(format: "%@%.1f%%", item.pnl_pct >= 0 ? "+" : "", item.pnl_pct))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(item.pnl_pct >= 0 ? Color(red: 0.0, green: 0.95, blue: 0.5) : Color(red: 1.0, green: 0.42, blue: 0.44))
+                        .lineLimit(1)
+                }
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(isSelected ? item.uiColor : Color(white: 0.15), lineWidth: isSelected ? 1.8 : 0.8)
-            )
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onTap?()
-            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isSelected ? item.uiColor : Color(white: 0.15), lineWidth: isSelected ? 1.8 : 0.8)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap?()
         }
     }
 
