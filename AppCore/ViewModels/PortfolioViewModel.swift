@@ -42,6 +42,7 @@ public final class PortfolioViewModel: ObservableObject {
     private var pendingRefreshRequested: Bool = false
     private var activeDataTasks: Set<URLSessionDataTask> = []
     private let tasksLock = NSLock()
+    private let startsAutomatically: Bool
 
     // MARK: - Tipos de Cambio Reales y Antigüedad Máxima
     public var eurUsdRate: Double? = nil
@@ -59,6 +60,7 @@ public final class PortfolioViewModel: ObservableObject {
     public var lastKnownQuotes: [String: MarketQuote] = [:]
 
     public init(startAutomatically: Bool = true) {
+        self.startsAutomatically = startAutomatically
         let defaults = UserDefaults.standard
 
         if let savedHost = defaults.string(forKey: Keys.pcHost), !savedHost.isEmpty {
@@ -111,6 +113,7 @@ public final class PortfolioViewModel: ObservableObject {
     // MARK: - Ciclo de Vida de iOS (Foreground / Background)
     public func applicationDidBecomeActive() {
         isAppActive = true
+        guard startsAutomatically else { return }
         startForegroundUpdates()
         refreshImmediate()
     }
