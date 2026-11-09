@@ -379,4 +379,44 @@ final class AppCoreTests: XCTestCase {
         XCTAssertEqual(vm.displayCurrency, "EUR")
         XCTAssertTrue(vm.statusText.contains("no disponible"))
     }
+    // 27. Una inversión cuya divisa no puede convertirse se conserva como no disponible, no como cero.
+    func test27_inversionNoConvertibleNoSeMuestraComoCero() {
+        let payload = PortfolioPayload(
+            currency: "EUR",
+            positions: [
+                RawPosition(coin: "BTC", name: "Bitcoin", icon: "₿", color: "#F3BA2F", source: "binance", invested: 500.0, entry_price: 50000.0, currency: "EUR"),
+                RawPosition(coin: "ETH", name: "Ethereum", icon: "Ξ", color: "#9B7DFF", source: "binance", invested: 250.0, entry_price: 2500.0, currency: "GBP")
+            ]
+        )
+        vm.eurUsdRate = nil
+        vm.eurUsdRateDate = nil
+        vm.gbpUsdRate = nil
+        vm.gbpUsdRateDate = nil
+        vm.portfolio = payload
+        vm.recalculatePortfolioFromBase(targetCurrency: "EUR")
+
+        let eth = vm.portfolio?.items.first(where: { $0.symbol == "ETH" })
+        XCTAssertNotNil(eth, "La posición original debe permanecer visible")
+        XCTAssertEqual(eth?.investmentConversionAvailable, false)
+        XCTAssertEqual(eth?.invested, 0.0, "El importe interno es un subtotal técnico; la interfaz debe mostrar un guion")
+        XCTAssertFalse(vm.portfolio?.investmentTotalIsComplete ?? true)
+        XCTAssertNil(eth?.value)
+        XCTAssertNil(eth?.pnl)
+    }
+
+    // 28. Los tipos de cambio futuros se rechazan en todas las rutas de conversión.
+    func test28_conversionRechazaTipoCambioFuturo() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now.addingTimeInterval(3600)
+        XCTAssertNil(vm.convertAmount(100, from: "EUR", to: "USD", now: now))
+        XCTAssertNil(vm.convertAmount(100, from: "USD", to: "EUR", now: now))
+
+        vm.gbpUsdRate = 1.30
+        vm.gbpUsdRateDate = now.addingTimeInterval(3600)
+        XCTAssertNil(vm.convertAmount(100, from: "GBP", to: "USD", now: now))
+        XCTAssertNil(vm.convertAmount(100, from: "GBP", to: "EUR", now: now))
+    }
+
+
 }

@@ -112,7 +112,7 @@ public struct DonutChartView: View {
                                 .foregroundColor(Color(white: 0.6))
                         }
 
-                        Text("Inv: \(formattedValue(item.invested))")
+                        Text(item.investmentConversionAvailable ? "Inv: \(formattedValue(item.invested))" : "Inv: —")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(Color(white: 0.68))
 

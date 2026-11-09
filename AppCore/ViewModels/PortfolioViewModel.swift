@@ -748,13 +748,15 @@ public final class PortfolioViewModel: ObservableObject {
                 pnl: pnl,
                 pnl_pct: pnlPct,
                 share_pct: (sharePct * 10).rounded() / 10,
-                current_price: livePrice
+                current_price: livePrice,
+                investmentConversionAvailable: coinInvestedInTarget[ck] != nil
             ))
         }
 
         current.currency = targetCurrency
         current.currency_symbol = targetSym
         current.total_invested = round2(totalInvestedAll)
+        current.investmentTotalIsComplete = allCurrenciesConvertible
         current.total_value = totalValue
         current.total_pnl = totalPnl
         current.total_pnl_pct = totalPnlPct

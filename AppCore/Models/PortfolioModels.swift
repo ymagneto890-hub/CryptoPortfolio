@@ -109,6 +109,7 @@ public struct PortfolioPayload: Codable, Equatable {
     public var currency: String
     public var currency_symbol: String
     public var total_invested: Double
+    public var investmentTotalIsComplete: Bool
     public var total_value: Double?
     public var total_pnl: Double?
     public var total_pnl_pct: Double?
@@ -123,6 +124,7 @@ public struct PortfolioPayload: Codable, Equatable {
         currency: String = "EUR",
         currency_symbol: String = "€",
         total_invested: Double = 0.0,
+        investmentTotalIsComplete: Bool = true,
         total_value: Double? = nil,
         total_pnl: Double? = nil,
         total_pnl_pct: Double? = nil,
@@ -136,6 +138,7 @@ public struct PortfolioPayload: Codable, Equatable {
         self.currency = currency
         self.currency_symbol = currency_symbol
         self.total_invested = total_invested
+        self.investmentTotalIsComplete = investmentTotalIsComplete
         self.total_value = total_value
         self.total_pnl = total_pnl
         self.total_pnl_pct = total_pnl_pct
@@ -147,7 +150,7 @@ public struct PortfolioPayload: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case updated_at, currency, currency_symbol, total_invested, total_value
+        case updated_at, currency, currency_symbol, total_invested, investmentTotalIsComplete, total_value
         case total_pnl, total_pnl_pct, valuation_status, valued_count, total_count
         case items, positions
     }
@@ -158,6 +161,7 @@ public struct PortfolioPayload: Codable, Equatable {
         currency = try container.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"
         currency_symbol = try container.decodeIfPresent(String.self, forKey: .currency_symbol) ?? "€"
         total_invested = try container.decodeIfPresent(Double.self, forKey: .total_invested) ?? 0.0
+        investmentTotalIsComplete = try container.decodeIfPresent(Bool.self, forKey: .investmentTotalIsComplete) ?? true
         total_value = try container.decodeIfPresent(Double.self, forKey: .total_value)
         total_pnl = try container.decodeIfPresent(Double.self, forKey: .total_pnl)
         total_pnl_pct = try container.decodeIfPresent(Double.self, forKey: .total_pnl_pct)
@@ -181,6 +185,7 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
     public var pnl_pct: Double?
     public var share_pct: Double
     public var current_price: Double?
+    public var investmentConversionAvailable: Bool
 
     public init(
         symbol: String,
@@ -192,7 +197,8 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
         pnl: Double? = nil,
         pnl_pct: Double? = nil,
         share_pct: Double = 0.0,
-        current_price: Double? = nil
+        current_price: Double? = nil,
+        investmentConversionAvailable: Bool = true
     ) {
         self.symbol = symbol
         self.name = name
@@ -204,10 +210,11 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
         self.pnl_pct = pnl_pct
         self.share_pct = share_pct
         self.current_price = current_price
+        self.investmentConversionAvailable = investmentConversionAvailable
     }
 
     private enum CodingKeys: String, CodingKey {
-        case symbol, name, icon, color, invested, value, pnl, pnl_pct, share_pct, current_price
+        case symbol, name, icon, color, invested, value, pnl, pnl_pct, share_pct, current_price, investmentConversionAvailable
     }
 
     public init(from decoder: Decoder) throws {
@@ -222,6 +229,7 @@ public struct PortfolioItem: Identifiable, Codable, Equatable {
         pnl_pct = try container.decodeIfPresent(Double.self, forKey: .pnl_pct)
         share_pct = try container.decodeIfPresent(Double.self, forKey: .share_pct) ?? 0.0
         current_price = try container.decodeIfPresent(Double.self, forKey: .current_price)
+        investmentConversionAvailable = try container.decodeIfPresent(Bool.self, forKey: .investmentConversionAvailable) ?? true
     }
 
     public var uiColor: Color {
