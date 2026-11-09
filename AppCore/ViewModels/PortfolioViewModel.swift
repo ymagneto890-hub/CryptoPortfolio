@@ -58,7 +58,7 @@ public final class PortfolioViewModel: ObservableObject {
     // Diccionario de cotizaciones verificadas (acceso serializado en DispatchQueue.main)
     public var lastKnownQuotes: [String: MarketQuote] = [:]
 
-    public init() {
+    public init(startAutomatically: Bool = true) {
         let defaults = UserDefaults.standard
 
         if let savedHost = defaults.string(forKey: Keys.pcHost), !savedHost.isEmpty {
@@ -97,9 +97,11 @@ public final class PortfolioViewModel: ObservableObject {
         loadCachedQuotes()
         loadCachedData()
 
-        // Iniciar en primer plano
-        startForegroundUpdates()
-        refreshImmediate()
+        // Production starts updates normally; tests can opt out of timers and network requests.
+        if startAutomatically {
+            startForegroundUpdates()
+            refreshImmediate()
+        }
     }
 
     deinit {
@@ -450,10 +452,11 @@ public final class PortfolioViewModel: ObservableObject {
         // 1. Obtener tipo de cambio EUR/USD real (Yahoo Finance EURUSD=X tasa FX oficial fiduciaria)
         group.enter()
         fetchRealEurUsdRate(updateId: thisUpdateId) { rate, date in
-            if let r = rate, r.isFinite, !r.isNaN, r > 0 {
+            if let r = rate, let d = date,
+               self.isExchangeRateUsable(r, date: d, now: Date()) {
                 localLock.lock()
                 fetchedEurUsdRate = r
-                fetchedEurUsdDate = date ?? Date()
+                fetchedEurUsdDate = d
                 localLock.unlock()
             }
             group.leave()
@@ -468,10 +471,11 @@ public final class PortfolioViewModel: ObservableObject {
         if portfolioNeedsGbp {
             group.enter()
             fetchRealGbpUsdRate(updateId: thisUpdateId) { rate, date in
-                if let r = rate, r.isFinite, !r.isNaN, r > 0 {
+                if let r = rate, let d = date,
+                   self.isExchangeRateUsable(r, date: d, now: Date()) {
                     localLock.lock()
                     fetchedGbpUsdRate = r
-                    fetchedGbpUsdDate = date ?? Date()
+                    fetchedGbpUsdDate = d
                     localLock.unlock()
                 }
                 group.leave()
@@ -532,13 +536,17 @@ public final class PortfolioViewModel: ObservableObject {
             // Aplicar tipos de cambio solo si fueron recibidos válidos y finitos
             if let eurRate = fetchedEurUsdRate, eurRate.isFinite, !eurRate.isNaN, eurRate > 0 {
                 self.eurUsdRate = eurRate
-                self.eurUsdRateDate = fetchedEurUsdDate ?? Date()
+                guard let rateDate = fetchedEurUsdDate,
+                      self.isExchangeRateUsable(eurRate, date: rateDate, now: Date()) else { return }
+                self.eurUsdRateDate = rateDate
                 UserDefaults.standard.set(eurRate, forKey: Keys.lastEurUsdRate)
                 UserDefaults.standard.set(self.eurUsdRateDate, forKey: Keys.lastEurRateDate)
             }
             if let gbpRate = fetchedGbpUsdRate, gbpRate.isFinite, !gbpRate.isNaN, gbpRate > 0 {
                 self.gbpUsdRate = gbpRate
-                self.gbpUsdRateDate = fetchedGbpUsdDate ?? Date()
+                guard let rateDate = fetchedGbpUsdDate,
+                      self.isExchangeRateUsable(gbpRate, date: rateDate, now: Date()) else { return }
+                self.gbpUsdRateDate = rateDate
                 UserDefaults.standard.set(gbpRate, forKey: Keys.lastGbpUsdRate)
                 UserDefaults.standard.set(self.gbpUsdRateDate, forKey: Keys.lastGbpRateDate)
             }

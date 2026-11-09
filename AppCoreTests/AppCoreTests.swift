@@ -7,7 +7,7 @@ final class AppCoreTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        vm = PortfolioViewModel()
+        vm = PortfolioViewModel(startAutomatically: false)
         vm.stopForegroundUpdates() // Aislar de temporizadores asíncronos para pruebas unitarias
     }
 
