@@ -921,6 +921,25 @@ public final class PortfolioViewModel: ObservableObject {
         }
     }
 
+    private func encodedBinanceSymbol(_ symbol: String) -> String? {
+        let normalized = symbol.uppercased()
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        guard !normalized.isEmpty,
+              normalized.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return nil
+        }
+        return normalized
+    }
+
+    private func encodedYahooSymbol(_ symbol: String) -> String? {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-^=_")
+        guard !symbol.isEmpty,
+              symbol.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return nil
+        }
+        return symbol.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+
     // MARK: - Clientes de Red Nativos Seguros (Cancelación Limpia y Generaciones)
 
     // Tipo de cambio EUR/USD: Yahoo Finance EURUSD=X (tasa FX real fiduciaria)
@@ -1119,7 +1138,13 @@ public final class PortfolioViewModel: ObservableObject {
 
     // Cotización de criptomonedas en Binance (Pares USDT)
     private func fetchBinancePrice(symbol: String, coin: String, updateId: Int, completion: @escaping (MarketQuote?) -> Void) {
-        guard let url = URL(string: "https://api.binance.com/api/v3/ticker/price?symbol=\(symbol)") else {
+        guard let safeSymbol = encodedBinanceSymbol(symbol),
+              var components = URLComponents(string: "https://api.binance.com/api/v3/ticker/price") else {
+            completion(nil)
+            return
+        }
+        components.queryItems = [URLQueryItem(name: "symbol", value: safeSymbol)]
+        guard let url = components.url else {
             completion(nil)
             return
         }
@@ -1163,8 +1188,8 @@ public final class PortfolioViewModel: ObservableObject {
 
     // Cotización de activos tradicionales en Yahoo Finance
     private func fetchYahooPrice(symbol: String, coin: String, updateId: Int, completion: @escaping (MarketQuote?) -> Void) {
-        let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? symbol
-        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=15m&range=1d") else {
+        guard let encoded = encodedYahooSymbol(symbol),
+              let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=15m&range=1d") else {
             completion(nil)
             return
         }
