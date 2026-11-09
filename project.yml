@@ -1,6 +1,19 @@
 name: AppCore
 options:
   bundleIdPrefix: com.cryptowidget
+schemes:
+  AppCore:
+    build:
+      targets:
+        AppCore: all
+    test:
+      config: Debug
+      targets:
+        - AppCoreTests
+    run:
+      config: Debug
+    archive:
+      config: Release
 targets:
   AppCore:
     type: application

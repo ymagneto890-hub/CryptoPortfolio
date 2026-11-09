@@ -33,8 +33,9 @@ public final class PortfolioViewModel: ObservableObject {
 
     // MARK: - Control de Temporizadores y Concurrencia
     private var priceTimer: Timer?
-    // Optimización de batería: ciclo predeterminado de 120 segundos
-    private let autoUpdateInterval: TimeInterval = 120.0
+    // Battery/network efficiency: refresh every five minutes while the app is foregrounded.
+    // Manual refresh remains immediate and background refreshes are stopped by scene lifecycle.
+    private let autoUpdateInterval: TimeInterval = 300.0
 
     private var currentUpdateId: Int = 0
     private var currentSyncGen: Int = 0
@@ -618,6 +619,11 @@ public final class PortfolioViewModel: ObservableObject {
                     break
                 }
                 coinTotalInvTarget += invInTarget
+                guard coinTotalInvTarget.isFinite else {
+                    conversionFailed = true
+                    allCurrenciesConvertible = false
+                    break
+                }
 
                 // Cálculo matemático exacto de unidades: quantity = invested / entry_price
                 // usando los datos originales de la posición
@@ -625,6 +631,9 @@ public final class PortfolioViewModel: ObservableObject {
                     let qty = pos.invested / rawEp
                     if qty.isFinite && !qty.isNaN && qty > 0 {
                         coinTotalQuantity += qty
+                        if !coinTotalQuantity.isFinite {
+                            hasCompleteQuantities = false
+                        }
                     } else {
                         hasCompleteQuantities = false
                     }
@@ -655,8 +664,10 @@ public final class PortfolioViewModel: ObservableObject {
                         coinLivePriceInTarget[coin] = convertedPrice
                         // Valor actual exacto: currentValue = totalQuantity * currentMarketPriceTarget
                         let val = coinTotalQuantity * convertedPrice
-                        coinValueInTarget[coin] = val
-                        coinHasValidValuation[coin] = true
+                        if val.isFinite, val > 0 {
+                            coinValueInTarget[coin] = val
+                            coinHasValidValuation[coin] = true
+                        }
                     }
                 }
             }
@@ -797,6 +808,10 @@ public final class PortfolioViewModel: ObservableObject {
         return false
     }
 
+    private func finitePositiveResult(_ value: Double) -> Double? {
+        value.isFinite && value > 0 ? value : nil
+    }
+
     private func isExchangeRateUsable(_ value: Double?, date: Date?, now: Date) -> Bool {
         guard let value = value, let date = date,
               value.isFinite, value > 0 else {
@@ -833,36 +848,36 @@ public final class PortfolioViewModel: ObservableObject {
         if s == "USD" && d == "EUR" {
             guard isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
                   let rate = eurUsdRate else { return nil }
-            return val / rate
+            return finitePositiveResult(val / rate)
         }
         if s == "EUR" && d == "USD" {
             guard isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
                   let rate = eurUsdRate else { return nil }
-            return val * rate
+            return finitePositiveResult(val * rate)
         }
 
         if s == "GBP" && d == "USD" {
             guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
                   let gRate = gbpUsdRate else { return nil }
-            return val * gRate
+            return finitePositiveResult(val * gRate)
         }
         if s == "USD" && d == "GBP" {
             guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
                   let gRate = gbpUsdRate else { return nil }
-            return val / gRate
+            return finitePositiveResult(val / gRate)
         }
 
         if s == "GBP" && d == "EUR" {
             guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
                   isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
                   let gRate = gbpUsdRate, let eRate = eurUsdRate else { return nil }
-            return (val * gRate) / eRate
+            return finitePositiveResult((val * gRate) / eRate)
         }
         if s == "EUR" && d == "GBP" {
             guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
                   isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
                   let gRate = gbpUsdRate, let eRate = eurUsdRate else { return nil }
-            return (val * eRate) / gRate
+            return finitePositiveResult((val * eRate) / gRate)
         }
 
         return nil
