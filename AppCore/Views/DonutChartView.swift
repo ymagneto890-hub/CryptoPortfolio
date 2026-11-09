@@ -216,12 +216,16 @@ public struct DonutChartView: View {
         .frame(width: size + lineWidth + 6, height: size + lineWidth + 6)
     }
 
-    private func formattedValue(_ val: Double) -> String {
+    private static let currencyFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
-        formatter.currencySymbol = currencySymbol
         formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: val)) ?? "\(currencySymbol)\(Int(val))"
+        return formatter
+    }()
+
+    private func formattedValue(_ val: Double) -> String {
+        Self.currencyFormatter.currencySymbol = currencySymbol
+        return Self.currencyFormatter.string(from: NSNumber(value: val)) ?? "\(currencySymbol)\(Int(val))"
     }
 
     private struct SliceData {

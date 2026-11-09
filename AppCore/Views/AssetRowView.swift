@@ -94,10 +94,15 @@ public struct AssetRowView: View {
         }
     }
 
-    private func formattedPrice(_ priceOpt: Double?) -> String {
-        guard let val = priceOpt, val > 0 else { return "—" }
+    private static let priceFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
+        return formatter
+    }()
+
+    private func formattedPrice(_ priceOpt: Double?) -> String {
+        guard let val = priceOpt, val.isFinite, val > 0 else { return "—" }
+        let formatter = Self.priceFormatter
         formatter.currencySymbol = currencySymbol
 
         if val >= 1000 {
