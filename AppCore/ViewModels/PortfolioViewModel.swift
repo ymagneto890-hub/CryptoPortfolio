@@ -923,14 +923,17 @@ public final class PortfolioViewModel: ObservableObject {
                let results = chart["result"] as? [[String: Any]],
                let first = results.first,
                let meta = first["meta"] as? [String: Any],
-               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0 {
-                let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map { TimeInterval($0) }
-                let rateDate = regTime.map { Date(timeIntervalSince1970: $0) } ?? Date()
-                completion(price, rateDate)
-                return
+               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0,
+               let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) {
+                let rateDate = Date(timeIntervalSince1970: regTime)
+                if isExchangeRateUsable(price, date: rateDate, now: Date()) {
+                    completion(price, rateDate)
+                    return
+                }
             }
 
-            // Fallback secundario a Binance EURUSDT (Aproximación USDT documentada)
+            // No substitute a missing market timestamp with the local receipt time.
+            // Fall back to the live Binance EURUSDT observation instead.
             self.fetchBinanceEurUsdFallback(updateId: updateId, completion: completion)
         }
 
@@ -973,6 +976,7 @@ public final class PortfolioViewModel: ObservableObject {
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let priceStr = json["price"] as? String,
                let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
+                // This is a local observation time from Binance ticker/price, not an exchange event timestamp.
                 completion(rate, Date())
                 return
             }
@@ -1017,13 +1021,16 @@ public final class PortfolioViewModel: ObservableObject {
                let results = chart["result"] as? [[String: Any]],
                let first = results.first,
                let meta = first["meta"] as? [String: Any],
-               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0 {
-                let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map { TimeInterval($0) }
-                let rateDate = regTime.map { Date(timeIntervalSince1970: $0) } ?? Date()
-                completion(price, rateDate)
-                return
+               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0,
+               let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) {
+                let rateDate = Date(timeIntervalSince1970: regTime)
+                if isExchangeRateUsable(price, date: rateDate, now: Date()) {
+                    completion(price, rateDate)
+                    return
+                }
             }
 
+            // Missing or invalid Yahoo market time is not replaced with the local receipt time.
             self.fetchBinanceGbpUsdFallback(updateId: updateId, completion: completion)
         }
 
