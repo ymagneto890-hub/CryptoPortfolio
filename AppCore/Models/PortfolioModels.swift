@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Modelos de Datos del Portafolio (100% Anónimos en Git)
 
-public struct RawPosition: Codable {
+public struct RawPosition: Codable, Equatable {
     public let coin: String
     public let name: String
     public let icon: String
@@ -16,7 +16,21 @@ public struct RawPosition: Codable {
     public let currency: String
 }
 
-public struct PortfolioPayload: Codable {
+public struct MarketQuote: Codable, Equatable {
+    public let symbol: String
+    public let price: Double
+    public let currency: String   // e.g. "USD", "EUR", "GBP", "GBp"
+    public let timestamp: Date
+
+    public init(symbol: String, price: Double, currency: String, timestamp: Date = Date()) {
+        self.symbol = symbol
+        self.price = price
+        self.currency = currency
+        self.timestamp = timestamp
+    }
+}
+
+public struct PortfolioPayload: Codable, Equatable {
     public var updated_at: String
     public var currency: String
     public var currency_symbol: String
@@ -50,7 +64,7 @@ public struct PortfolioPayload: Codable {
     }
 }
 
-public struct PortfolioItem: Identifiable, Codable {
+public struct PortfolioItem: Identifiable, Codable, Equatable {
     public var id: String { symbol }
     public let symbol: String
     public let name: String

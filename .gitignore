@@ -1,0 +1,14 @@
+# Xcode / macOS
+.DS_Store
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+build/
+Payload/
+*.ipa
+*.xcarchive
+*.dSYM
+
+# Archivos temporales y de depuración
+*.log

@@ -6,11 +6,14 @@ public struct SettingsView: View {
 
     @State private var inputHost: String = ""
     @State private var inputPort: String = ""
+    @State private var inputToken: String = ""
+    @State private var showToken: Bool = false
 
     public init(vm: PortfolioViewModel) {
         self.vm = vm
         _inputHost = State(initialValue: vm.pcHost)
         _inputPort = State(initialValue: vm.pcPort)
+        _inputToken = State(initialValue: KeychainHelper.loadToken() ?? "")
     }
 
     public var body: some View {
@@ -37,6 +40,7 @@ public struct SettingsView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(Color(white: 0.6))
 
+                    // Campo IP
                     HStack {
                         Image(systemName: "desktopcomputer")
                             .foregroundColor(.gray)
@@ -51,6 +55,7 @@ public struct SettingsView: View {
                     .background(Color(white: 0.12))
                     .cornerRadius(8)
 
+                    // Campo Puerto
                     HStack {
                         Image(systemName: "network")
                             .foregroundColor(.gray)
@@ -62,11 +67,39 @@ public struct SettingsView: View {
                     .padding(10)
                     .background(Color(white: 0.12))
                     .cornerRadius(8)
+
+                    // Campo Token Privado (Keychain Seguro)
+                    HStack {
+                        Image(systemName: "key.fill")
+                            .foregroundColor(.gray)
+                        if showToken {
+                            TextField("Token de acceso (opcional)", text: $inputToken)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.white)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                        } else {
+                            SecureField("Token de acceso (opcional)", text: $inputToken)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.white)
+                                .autocapitalization(.none)
+                                .disableAutocorrection(true)
+                        }
+                        Button(action: { showToken.toggle() }) {
+                            Image(systemName: showToken ? "eye.slash.fill" : "eye.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding(10)
+                    .background(Color(white: 0.12))
+                    .cornerRadius(8)
                 }
 
                 // Botón Guardar y Sincronizar
                 Button(action: {
                     vm.saveConnectionSettings(host: inputHost, port: inputPort)
+                    KeychainHelper.saveToken(inputToken)
                     vm.performSync(isManual: true)
                     presentationMode.wrappedValue.dismiss()
                 }) {
@@ -82,7 +115,7 @@ public struct SettingsView: View {
                     .cornerRadius(10)
                 }
 
-                Text("Asegúrate de tener encendido tu CryptoWidget en el PC y ambos dispositivos en la misma red WiFi.")
+                Text("El token se almacena cifrado en el Keychain del iPhone. Si tu servidor no requiere token, déjalo en blanco.")
                     .font(.system(size: 10))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)

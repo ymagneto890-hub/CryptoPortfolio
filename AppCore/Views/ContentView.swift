@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct ContentView: View {
     @StateObject private var vm = PortfolioViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showingSettings = false
 
     private let gridColumns = [
@@ -133,6 +134,17 @@ public struct ContentView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(vm: vm)
+        }
+        .onChange(of: scenePhase) { phase in
+            switch phase {
+            case .active:
+                vm.startForegroundUpdates()
+                vm.refreshIfNeeded()
+            case .inactive, .background:
+                vm.stopForegroundUpdates()
+            @unknown default:
+                break
+            }
         }
     }
 }
