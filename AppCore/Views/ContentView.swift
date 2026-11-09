@@ -30,6 +30,17 @@ public struct ContentView: View {
 
                     Spacer()
 
+                    // Botón Conmutador Divisa (USD / EUR)
+                    Button(action: { vm.toggleCurrency() }) {
+                        Text(vm.displayCurrency == "EUR" ? "€ EUR" : "$ USD")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(Color(red: 0.0, green: 0.95, blue: 0.95))
+                            .padding(.horizontal, 9)
+                            .frame(height: 32)
+                            .background(Color(white: 0.13))
+                            .clipShape(Capsule())
+                    }
+
                     // Botón Actualizar desde PC (Solo icono limpio)
                     Button(action: { vm.performSync(isManual: true) }) {
                         Image(systemName: "arrow.triangle.2.circlepath")
@@ -100,7 +111,7 @@ public struct ContentView: View {
                         totalValue: 0,
                         totalPnl: 0,
                         totalPnlPct: 0,
-                        currencySymbol: "$",
+                        currencySymbol: vm.displayCurrency == "EUR" ? "€" : "$",
                         isWaitingFirstSync: true
                     )
 

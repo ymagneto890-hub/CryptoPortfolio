@@ -58,7 +58,7 @@ public struct DonutChartView: View {
                         .font(.system(size: 15, weight: .black, design: .rounded))
                         .foregroundColor(.white)
 
-                    Text("Pulsa 'Sincronizar PC'")
+                    Text("Pulsa actualizar 🔄")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(Color(white: 0.6))
                 }

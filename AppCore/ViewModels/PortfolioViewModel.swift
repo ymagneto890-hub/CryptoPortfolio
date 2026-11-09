@@ -4,6 +4,7 @@ import Combine
 
 public final class PortfolioViewModel: ObservableObject {
     @Published public var portfolio: PortfolioPayload?
+    @Published public var displayCurrency: String = "USD"
     @Published public var selectedSymbol: String? = nil
     @Published public var isSyncing: Bool = false
     @Published public var statusText: String = "Listo"
@@ -15,6 +16,7 @@ public final class PortfolioViewModel: ObservableObject {
     private let lastSuccessKey = "last_sync_success_date"
     private let hostKey = "pc_server_host"
     private let portKey = "pc_server_port"
+    private let currencyPrefKey = "preferred_display_currency"
 
     private var priceTimer: Timer?
     private var eurUsdRate: Double = 1.08
@@ -26,12 +28,14 @@ public final class PortfolioViewModel: ObservableObject {
         if let savedPort = UserDefaults.standard.string(forKey: portKey), !savedPort.isEmpty {
             self.pcPort = savedPort
         }
+        if let savedCurr = UserDefaults.standard.string(forKey: currencyPrefKey), !savedCurr.isEmpty {
+            self.displayCurrency = savedCurr
+        }
 
         // 1. Cargar posiciones guardadas en el iPhone
         loadCachedData()
 
         // 2. Actualizar precios en vivo desde Internet automáticamente cada 15s
-        // (La sincronización con el PC ahora es 100% manual desde el botón de arriba)
         updateLivePricesFromInternet()
         startAutoPriceTimer()
     }
@@ -48,6 +52,49 @@ public final class PortfolioViewModel: ObservableObject {
                 selectedSymbol = symbol
             }
         }
+    }
+
+    // MARK: - Botón Conmutador EUR <-> USD Instantáneo
+    public func toggleCurrency() {
+        let oldCurr = displayCurrency
+        let newCurr = (oldCurr == "USD") ? "EUR" : "USD"
+        let newSym = (newCurr == "EUR") ? "€" : "$"
+
+        displayCurrency = newCurr
+        UserDefaults.standard.set(newCurr, forKey: currencyPrefKey)
+
+        // Conversión instantánea en pantalla (0ms de espera)
+        if var current = self.portfolio {
+            let srcCurr = current.currency
+            if srcCurr != newCurr {
+                current.total_invested = round2(convertAmount(current.total_invested, from: srcCurr, to: newCurr))
+                current.total_value = round2(convertAmount(current.total_value, from: srcCurr, to: newCurr))
+                current.total_pnl = round2(convertAmount(current.total_pnl, from: srcCurr, to: newCurr))
+
+                var updatedItems: [PortfolioItem] = []
+                for var item in current.items {
+                    item.invested = round2(convertAmount(item.invested, from: srcCurr, to: newCurr))
+                    item.value = round2(convertAmount(item.value, from: srcCurr, to: newCurr))
+                    item.pnl = round2(convertAmount(item.pnl, from: srcCurr, to: newCurr))
+                    updatedItems.append(item)
+                }
+                current.items = updatedItems
+                current.currency = newCurr
+                current.currency_symbol = newSym
+
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    self.portfolio = current
+                }
+                saveToCache(current)
+            }
+        }
+
+        // Recalcular en segundo plano con las posiciones exactas
+        updateLivePricesFromInternet()
+    }
+
+    private func round2(_ val: Double) -> Double {
+        (val * 100).rounded() / 100
     }
 
     private func startAutoPriceTimer() {
@@ -70,9 +117,11 @@ public final class PortfolioViewModel: ObservableObject {
             if let decoded = try? decoder.decode(PortfolioPayload.self, from: data) {
                 self.portfolio = decoded
                 self.hasSyncedOnce = true
+                if UserDefaults.standard.string(forKey: currencyPrefKey) == nil {
+                    self.displayCurrency = decoded.currency
+                }
             }
         }
-        updateStatusLabel(liveTime: nil)
     }
 
     private func saveToCache(_ payload: PortfolioPayload) {
@@ -82,33 +131,13 @@ public final class PortfolioViewModel: ObservableObject {
         }
     }
 
-    private func updateStatusLabel(liveTime: String?) {
-        var pcPart = "Sin sinc. PC"
-        if let lastSuccess = UserDefaults.standard.object(forKey: lastSuccessKey) as? Date {
-            self.hasSyncedOnce = true
-            let dayFormatter = DateFormatter()
-            dayFormatter.dateFormat = "dd/MM HH:mm"
-            pcPart = "PC: \(dayFormatter.string(from: lastSuccess))"
-        }
-
-        if let live = liveTime {
-            self.statusText = "En vivo \(live) • \(pcPart)"
-        } else if self.portfolio != nil {
-            self.statusText = "Precios en vivo • \(pcPart)"
-        } else {
-            self.statusText = "Pulsa 'Sincronizar PC' arriba"
-        }
-    }
-
     // MARK: - 1. Sincronización Manual con el PC (Botón superior)
     public func performSync(isManual: Bool = true) {
         guard !isSyncing else { return }
         isSyncing = true
-        statusText = "Conectando con el PC..."
 
         guard let url = URL(string: "http://\(pcHost):\(pcPort)/api/portfolio") else {
             isSyncing = false
-            statusText = "IP no válida"
             return
         }
 
@@ -124,15 +153,33 @@ public final class PortfolioViewModel: ObservableObject {
                 if let data = data, error == nil,
                    let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     let decoder = JSONDecoder()
-                    if let newPayload = try? decoder.decode(PortfolioPayload.self, from: data) {
+                    if var newPayload = try? decoder.decode(PortfolioPayload.self, from: data) {
+                        if UserDefaults.standard.string(forKey: self.currencyPrefKey) == nil {
+                            self.displayCurrency = newPayload.currency
+                            UserDefaults.standard.set(newPayload.currency, forKey: self.currencyPrefKey)
+                        } else if newPayload.currency != self.displayCurrency {
+                            let src = newPayload.currency
+                            let dst = self.displayCurrency
+                            newPayload.total_invested = self.round2(self.convertAmount(newPayload.total_invested, from: src, to: dst))
+                            newPayload.total_value = self.round2(self.convertAmount(newPayload.total_value, from: src, to: dst))
+                            newPayload.total_pnl = self.round2(self.convertAmount(newPayload.total_pnl, from: src, to: dst))
+
+                            var updatedItems: [PortfolioItem] = []
+                            for var item in newPayload.items {
+                                item.invested = self.round2(self.convertAmount(item.invested, from: src, to: dst))
+                                item.value = self.round2(self.convertAmount(item.value, from: src, to: dst))
+                                item.pnl = self.round2(self.convertAmount(item.pnl, from: src, to: dst))
+                                updatedItems.append(item)
+                            }
+                            newPayload.items = updatedItems
+                            newPayload.currency = dst
+                            newPayload.currency_symbol = (dst == "EUR") ? "€" : "$"
+                        }
+
                         self.portfolio = newPayload
                         self.hasSyncedOnce = true
-                        UserDefaults.standard.set(data, forKey: self.userDefaultsKey)
+                        self.saveToCache(newPayload)
                         UserDefaults.standard.set(Date(), forKey: self.lastSuccessKey)
-
-                        let tf = DateFormatter()
-                        tf.dateFormat = "HH:mm:ss"
-                        self.updateStatusLabel(liveTime: tf.string(from: Date()))
 
                         self.updateLivePricesFromInternet()
                         return
@@ -140,10 +187,7 @@ public final class PortfolioViewModel: ObservableObject {
                 }
 
                 if self.portfolio != nil {
-                    self.statusText = "PC apagado/fuera de red • Usando datos guardados"
                     self.updateLivePricesFromInternet()
-                } else {
-                    self.statusText = "No se encontró el PC (revisa WiFi)"
                 }
             }
         }.resume()
@@ -157,7 +201,8 @@ public final class PortfolioViewModel: ObservableObject {
             return
         }
 
-        let targetCurr = currentPortfolio.currency
+        let targetCurr = self.displayCurrency
+        let targetSym = (targetCurr == "EUR") ? "€" : "$"
         let uniqueCoins = Array(Set(positions.map { $0.coin }))
 
         let group = DispatchGroup()
@@ -246,26 +291,24 @@ public final class PortfolioViewModel: ObservableObject {
                     name: meta?.name ?? ck,
                     icon: meta?.icon ?? "◆",
                     color: meta?.color ?? "#F3BA2F",
-                    invested: (inv * 100).rounded() / 100,
-                    value: (curVal * 100).rounded() / 100,
-                    pnl: (pnl * 100).rounded() / 100,
-                    pnl_pct: (pnlPct * 100).rounded() / 100,
+                    invested: self.round2(inv),
+                    value: self.round2(curVal),
+                    pnl: self.round2(pnl),
+                    pnl_pct: self.round2(pnlPct),
                     share_pct: (sharePct * 10).rounded() / 10
                 ))
             }
 
-            updated.total_invested = (totalInvested * 100).rounded() / 100
-            updated.total_value = (totalCurrentVal * 100).rounded() / 100
-            updated.total_pnl = (totalPnl * 100).rounded() / 100
-            updated.total_pnl_pct = (totalPnlPct * 100).rounded() / 100
+            updated.currency = targetCurr
+            updated.currency_symbol = targetSym
+            updated.total_invested = self.round2(totalInvested)
+            updated.total_value = self.round2(totalCurrentVal)
+            updated.total_pnl = self.round2(totalPnl)
+            updated.total_pnl_pct = self.round2(totalPnlPct)
             updated.items = newItems
 
             self.portfolio = updated
             self.saveToCache(updated)
-
-            let tf = DateFormatter()
-            tf.dateFormat = "HH:mm:ss"
-            self.updateStatusLabel(liveTime: tf.string(from: Date()))
         }
     }
 
