@@ -451,8 +451,8 @@ public final class PortfolioViewModel: ObservableObject {
 
         // 1. Obtener tipo de cambio EUR/USD real (Yahoo Finance EURUSD=X tasa FX oficial fiduciaria)
         group.enter()
-        fetchRealEurUsdRate(updateId: thisUpdateId) { rate, date in
-            if let r = rate, let d = date,
+        fetchRealEurUsdRate(updateId: thisUpdateId) { [weak self] rate, date in
+            if let self = self, let r = rate, let d = date,
                self.isExchangeRateUsable(r, date: d, now: Date()) {
                 localLock.lock()
                 fetchedEurUsdRate = r
@@ -470,8 +470,8 @@ public final class PortfolioViewModel: ObservableObject {
 
         if portfolioNeedsGbp {
             group.enter()
-            fetchRealGbpUsdRate(updateId: thisUpdateId) { rate, date in
-                if let r = rate, let d = date,
+            fetchRealGbpUsdRate(updateId: thisUpdateId) { [weak self] rate, date in
+                if let self = self, let r = rate, let d = date,
                    self.isExchangeRateUsable(r, date: d, now: Date()) {
                     localLock.lock()
                     fetchedGbpUsdRate = r
@@ -552,8 +552,13 @@ public final class PortfolioViewModel: ObservableObject {
                 UserDefaults.standard.set(rateDate, forKey: Keys.lastGbpRateDate)
             }
 
-            // Aplicar cotizaciones frescas preservando timestamps más recientes
+            // Persist only usable quotes. An unverified Yahoo timestamp must not replace
+            // an older, still-valid cached quote.
             for (coin, freshQuote) in freshlyFetchedQuotes {
+                guard self.isQuotePriceValid(freshQuote.price),
+                      self.isQuoteTimestampValid(freshQuote, now: Date()) else {
+                    continue
+                }
                 if let existing = self.lastKnownQuotes[coin] {
                     if freshQuote.timestamp >= existing.timestamp {
                         self.lastKnownQuotes[coin] = freshQuote
