@@ -13,6 +13,14 @@ targets:
       properties:
         CFBundleDisplayName: Portfolio
         UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - Icon-60
+            UIPrerenderedIcon: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     settings:

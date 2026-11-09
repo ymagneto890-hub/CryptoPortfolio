@@ -30,6 +30,9 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
+          cp CryptoPortfolio/Icon-60@2x.png CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app/
+          cp CryptoPortfolio/Icon-60@3x.png CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app/
+
           mkdir -p Payload
           cp -r CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app Payload/
           zip -r CryptoPortfolio.ipa Payload

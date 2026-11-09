@@ -3,15 +3,29 @@ import SwiftUI
 
 // MARK: - Modelos de Datos del Portafolio (100% Anónimos en Git)
 
-public struct PortfolioPayload: Codable {
-    public let updated_at: String
+public struct RawPosition: Codable {
+    public let coin: String
+    public let name: String
+    public let icon: String
+    public let color: String
+    public let source: String
+    public let yahoo_sym: String?
+    public let yahoo_sym_eur: String?
+    public let invested: Double
+    public let entry_price: Double
     public let currency: String
-    public let currency_symbol: String
-    public let total_invested: Double
-    public let total_value: Double
-    public let total_pnl: Double
-    public let total_pnl_pct: Double
-    public let items: [PortfolioItem]
+}
+
+public struct PortfolioPayload: Codable {
+    public var updated_at: String
+    public var currency: String
+    public var currency_symbol: String
+    public var total_invested: Double
+    public var total_value: Double
+    public var total_pnl: Double
+    public var total_pnl_pct: Double
+    public var items: [PortfolioItem]
+    public var positions: [RawPosition]?
 
     public init(
         updated_at: String = "",
@@ -21,7 +35,8 @@ public struct PortfolioPayload: Codable {
         total_value: Double = 0.0,
         total_pnl: Double = 0.0,
         total_pnl_pct: Double = 0.0,
-        items: [PortfolioItem] = []
+        items: [PortfolioItem] = [],
+        positions: [RawPosition]? = nil
     ) {
         self.updated_at = updated_at
         self.currency = currency
@@ -31,6 +46,7 @@ public struct PortfolioPayload: Codable {
         self.total_pnl = total_pnl
         self.total_pnl_pct = total_pnl_pct
         self.items = items
+        self.positions = positions
     }
 }
 
@@ -40,11 +56,11 @@ public struct PortfolioItem: Identifiable, Codable {
     public let name: String
     public let icon: String
     public let color: String
-    public let invested: Double
-    public let value: Double
-    public let pnl: Double
-    public let pnl_pct: Double
-    public let share_pct: Double
+    public var invested: Double
+    public var value: Double
+    public var pnl: Double
+    public var pnl_pct: Double
+    public var share_pct: Double
 
     public init(
         symbol: String,
