@@ -795,6 +795,15 @@ public final class PortfolioViewModel: ObservableObject {
         return false
     }
 
+    private func isExchangeRateUsable(_ value: Double?, date: Date?, now: Date) -> Bool {
+        guard let value = value, let date = date,
+              value.isFinite, value > 0 else {
+            return false
+        }
+        let age = now.timeIntervalSince(date)
+        return age >= 0 && age < maxRateAgeSeconds
+    }
+
     // MARK: - Conversión Exacta de Divisas (EUR, USD, GBP, GBp, USDT)
     public func convertAmount(_ amount: Double, from src: String, to dst: String, now: Date = Date()) -> Double? {
         guard amount.isFinite, !amount.isNaN, amount > 0 else { return nil }
@@ -820,39 +829,37 @@ public final class PortfolioViewModel: ObservableObject {
 
         // Comprobación continua de antigüedad de tipos de cambio (< 48 horas)
         if s == "USD" && d == "EUR" {
-            guard let rate = eurUsdRate, rate.isFinite, !rate.isNaN, rate > 0,
-                  let rDate = eurUsdRateDate, now.timeIntervalSince(rDate) < maxRateAgeSeconds else { return nil }
+            guard isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let rate = eurUsdRate else { return nil }
             return val / rate
         }
         if s == "EUR" && d == "USD" {
-            guard let rate = eurUsdRate, rate.isFinite, !rate.isNaN, rate > 0,
-                  let rDate = eurUsdRateDate, now.timeIntervalSince(rDate) < maxRateAgeSeconds else { return nil }
+            guard isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let rate = eurUsdRate else { return nil }
             return val * rate
         }
 
         if s == "GBP" && d == "USD" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0,
-                  let gDate = gbpUsdRateDate, now.timeIntervalSince(gDate) < maxRateAgeSeconds else { return nil }
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  let gRate = gbpUsdRate else { return nil }
             return val * gRate
         }
         if s == "USD" && d == "GBP" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0,
-                  let gDate = gbpUsdRateDate, now.timeIntervalSince(gDate) < maxRateAgeSeconds else { return nil }
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  let gRate = gbpUsdRate else { return nil }
             return val / gRate
         }
 
         if s == "GBP" && d == "EUR" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0, let gDate = gbpUsdRateDate,
-                  let eRate = eurUsdRate, eRate.isFinite, !eRate.isNaN, eRate > 0, let eDate = eurUsdRateDate,
-                  now.timeIntervalSince(gDate) < maxRateAgeSeconds,
-                  now.timeIntervalSince(eDate) < maxRateAgeSeconds else { return nil }
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let gRate = gbpUsdRate, let eRate = eurUsdRate else { return nil }
             return (val * gRate) / eRate
         }
         if s == "EUR" && d == "GBP" {
-            guard let gRate = gbpUsdRate, gRate.isFinite, !gRate.isNaN, gRate > 0, let gDate = gbpUsdRateDate,
-                  let eRate = eurUsdRate, eRate.isFinite, !eRate.isNaN, eRate > 0, let eDate = eurUsdRateDate,
-                  now.timeIntervalSince(gDate) < maxRateAgeSeconds,
-                  now.timeIntervalSince(eDate) < maxRateAgeSeconds else { return nil }
+            guard isExchangeRateUsable(gbpUsdRate, date: gbpUsdRateDate, now: now),
+                  isExchangeRateUsable(eurUsdRate, date: eurUsdRateDate, now: now),
+                  let gRate = gbpUsdRate, let eRate = eurUsdRate else { return nil }
             return (val * eRate) / gRate
         }
 
@@ -882,7 +889,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -896,7 +903,8 @@ public final class PortfolioViewModel: ObservableObject {
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let chart = root["chart"] as? [String: Any],
                let results = chart["result"] as? [[String: Any]],
@@ -933,7 +941,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 3.5
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -947,7 +955,8 @@ public final class PortfolioViewModel: ObservableObject {
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let priceStr = json["price"] as? String,
                let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
@@ -974,7 +983,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -988,7 +997,8 @@ public final class PortfolioViewModel: ObservableObject {
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let chart = root["chart"] as? [String: Any],
                let results = chart["result"] as? [[String: Any]],
@@ -1024,7 +1034,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 3.5
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1038,7 +1048,8 @@ public final class PortfolioViewModel: ObservableObject {
                 return
             }
 
-            if let data = data, error == nil,
+            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+               let data = data, error == nil,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let priceStr = json["price"] as? String,
                let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
@@ -1064,7 +1075,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 4.0
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1078,7 +1089,8 @@ public final class PortfolioViewModel: ObservableObject {
                 return
             }
 
-            guard let data = data, error == nil,
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data, error == nil,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let priceStr = json["price"] as? String,
                   let price = Double(priceStr), price.isFinite, !price.isNaN, price > 0 else {
@@ -1087,7 +1099,7 @@ public final class PortfolioViewModel: ObservableObject {
             }
 
             // Moneda identificada como USDT (aproximación de mercado documentada frente a USD)
-            let quote = MarketQuote(symbol: coin, price: price, currency: "USDT", timestamp: Date(), source: "binance", isVerifiedTimestamp: true)
+            let quote = MarketQuote(symbol: coin, price: price, currency: "USDT", timestamp: Date(), source: "binance", isVerifiedTimestamp: false)
             completion(quote)
         }
 
@@ -1109,7 +1121,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1123,7 +1135,8 @@ public final class PortfolioViewModel: ObservableObject {
                 return
             }
 
-            guard let data = data, error == nil,
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data, error == nil,
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let chart = root["chart"] as? [String: Any],
                   let results = chart["result"] as? [[String: Any]],
