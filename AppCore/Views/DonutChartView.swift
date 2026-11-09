@@ -77,7 +77,7 @@ public struct DonutChartView: View {
                     .stroke(Color(white: 0.11), lineWidth: lineWidth)
                     .frame(width: size, height: size)
 
-                // Segmentos de cada activo con distribución real
+                // Segmentos de cada activo con distribución matemática coherente
                 ForEach(Array(slices.enumerated()), id: \.offset) { _, slice in
                     let isDimmed = (selectedSymbol != nil && selectedSymbol != slice.symbol)
                     DonutSliceShape(startAngle: slice.startAngle, endAngle: slice.endAngle)
@@ -144,10 +144,11 @@ public struct DonutChartView: View {
                     }
                 } else {
                     VStack(spacing: 3) {
-                        Text("PORTAFOLIO")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .tracking(1.4)
-                            .foregroundColor(Color(white: 0.6))
+                        // Título del portafolio: Indica expresamente si la valoración es parcial
+                        Text(valuationStatus == .partial ? "PARCIAL (\(valuedCount)/\(totalCount))" : "PORTAFOLIO")
+                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                            .tracking(1.3)
+                            .foregroundColor(valuationStatus == .partial ? Color(red: 1.0, green: 0.78, blue: 0.28) : Color(white: 0.6))
 
                         if let tVal = totalValue {
                             Text(formattedValue(tVal))
@@ -186,12 +187,13 @@ public struct DonutChartView: View {
                             }
 
                         case .partial:
-                            Text("Parcial (\(valuedCount)/\(totalCount))")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                            // Indica que la cifra central representa únicamente los activos con cotización
+                            Text("Subtotal cotizados")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
                                 .foregroundColor(Color(red: 1.0, green: 0.78, blue: 0.28))
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 4)
-                                .background(Color(red: 0.4, green: 0.3, blue: 0.08).opacity(0.45))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color(red: 0.4, green: 0.3, blue: 0.08).opacity(0.50))
                                 .clipShape(Capsule())
 
                         case .unvalued:

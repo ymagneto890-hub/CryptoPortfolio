@@ -19,27 +19,78 @@ public struct RawPosition: Codable, Equatable {
     public let yahoo_sym: String?
     public let yahoo_sym_eur: String?
     public let invested: Double
-    public let entry_price: Double
+    public let entry_price: Double? // Opcional: una inversión válida no se pierde si falta el precio de entrada
     public let currency: String
+
+    public init(
+        coin: String,
+        name: String,
+        icon: String,
+        color: String,
+        source: String,
+        yahoo_sym: String? = nil,
+        yahoo_sym_eur: String? = nil,
+        invested: Double,
+        entry_price: Double? = nil,
+        currency: String
+    ) {
+        self.coin = coin
+        self.name = name
+        self.icon = icon
+        self.color = color
+        self.source = source
+        self.yahoo_sym = yahoo_sym
+        self.yahoo_sym_eur = yahoo_sym_eur
+        self.invested = invested
+        self.entry_price = entry_price
+        self.currency = currency
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case coin, name, icon, color, source, yahoo_sym, yahoo_sym_eur, invested, entry_price, currency
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        coin = try container.decode(String.self, forKey: .coin)
+        name = try container.decode(String.self, forKey: .name)
+        icon = try container.decode(String.self, forKey: .icon)
+        color = try container.decode(String.self, forKey: .color)
+        source = try container.decode(String.self, forKey: .source)
+        yahoo_sym = try container.decodeIfPresent(String.self, forKey: .yahoo_sym)
+        yahoo_sym_eur = try container.decodeIfPresent(String.self, forKey: .yahoo_sym_eur)
+        invested = try container.decodeIfPresent(Double.self, forKey: .invested) ?? 0.0
+        entry_price = try container.decodeIfPresent(Double.self, forKey: .entry_price)
+        currency = try container.decodeIfPresent(String.self, forKey: .currency) ?? "EUR"
+    }
 }
 
 public struct MarketQuote: Codable, Equatable {
     public let symbol: String
     public let price: Double
-    public let currency: String   // e.g. "USD", "EUR", "GBP", "GBp"
+    public let currency: String   // e.g. "USD", "EUR", "GBP", "GBp", "USDT"
     public let timestamp: Date
     public let source: String     // e.g. "binance", "yahoo"
+    public let isVerifiedTimestamp: Bool
 
-    public init(symbol: String, price: Double, currency: String, timestamp: Date = Date(), source: String = "unknown") {
+    public init(
+        symbol: String,
+        price: Double,
+        currency: String,
+        timestamp: Date = Date(),
+        source: String = "unknown",
+        isVerifiedTimestamp: Bool = true
+    ) {
         self.symbol = symbol
         self.price = price
         self.currency = currency
         self.timestamp = timestamp
         self.source = source
+        self.isVerifiedTimestamp = isVerifiedTimestamp
     }
 
     private enum CodingKeys: String, CodingKey {
-        case symbol, price, currency, timestamp, source
+        case symbol, price, currency, timestamp, source, isVerifiedTimestamp
     }
 
     public init(from decoder: Decoder) throws {
@@ -49,6 +100,7 @@ public struct MarketQuote: Codable, Equatable {
         currency = try container.decode(String.self, forKey: .currency)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? "unknown"
+        isVerifiedTimestamp = try container.decodeIfPresent(Bool.self, forKey: .isVerifiedTimestamp) ?? false
     }
 }
 

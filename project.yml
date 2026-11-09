@@ -15,6 +15,7 @@ targets:
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        NSLocalNetworkUsageDescription: "CryptoPortfolio requiere acceso a la red local para sincronizar tus posiciones con tu ordenador."
         CFBundleIcons:
           CFBundlePrimaryIcon:
             CFBundleIconFiles:
@@ -47,3 +48,19 @@ targets:
           STRIP_STYLE: "all"
           COPY_PHASE_STRIP: "YES"
           DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+
+  AppCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: AppCoreTests
+    dependencies:
+      - target: AppCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cryptowidget.portfolio.tests
+        SWIFT_VERSION: "5.0"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
