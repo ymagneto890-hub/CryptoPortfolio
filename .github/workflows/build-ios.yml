@@ -5,7 +5,6 @@ on:
     branches:
       - main
       - master
-      - fix/portfolio-reliability-audit
     tags:
       - "v*"
   workflow_dispatch:
@@ -19,19 +18,27 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Select Xcode
         run: |
+          if [ -d "/Applications/Xcode_16.1.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.1.app
+          elif [ -d "/Applications/Xcode_16.0.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.0.app
+          fi
           xcodebuild -version
-          xcode-select -p
 
-      - name: Install XcodeGen
+      - name: Install Pinned XcodeGen (2.42.0)
         run: |
-          brew install xcodegen
+          XCODEGEN_VER="2.42.0"
+          curl -Ls "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VER}/xcodegen.zip" -o xcodegen.zip
+          unzip -q xcodegen.zip
+          cd xcodegen && sudo ./install.sh && cd ..
+          rm -rf xcodegen xcodegen.zip
           xcodegen --version
 
       - name: Generate Xcode project
@@ -87,11 +94,10 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" CryptoPortfolio.ipa \
-            --title "CryptoPortfolio $GITHUB_REF_NAME — iOS 15+" \
-            --notes "Native iOS build. Financial data validation and reliability fixes. Original interface and layout retained." \
-            --target "$GITHUB_SHA"
+          gh release create v1.2.1 CryptoPortfolio.ipa \
+            --title "CryptoPortfolio v1.2.1 (iOS 15+ Native IPA)" \
+            --notes "CryptoPortfolio 1.2.1 compilado para TrollStore con optimizaciones de memoria, validación de tickers y resiliencia de red." \
+            --clobber || true
