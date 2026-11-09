@@ -876,6 +876,17 @@ public final class PortfolioViewModel: ObservableObject {
         (val * 100).rounded() / 100
     }
 
+    // Network callbacks may arrive on background queues. Serialize lifecycle/generation
+    // reads through the main queue; avoid main.sync when already on the main thread.
+    private func isCurrentUpdate(_ updateId: Int) -> Bool {
+        if Thread.isMainThread {
+            return isAppActive && updateId == currentUpdateId
+        }
+        return DispatchQueue.main.sync {
+            isAppActive && updateId == currentUpdateId
+        }
+    }
+
     // MARK: - Clientes de Red Nativos Seguros (Cancelación Limpia y Generaciones)
 
     // Tipo de cambio EUR/USD: Yahoo Finance EURUSD=X (tasa FX real fiduciaria)
@@ -898,7 +909,7 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
@@ -928,7 +939,7 @@ public final class PortfolioViewModel: ObservableObject {
     }
 
     private func fetchBinanceEurUsdFallback(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard isAppActive, updateId == currentUpdateId else {
+        guard isCurrentUpdate(updateId) else {
             completion(nil, nil)
             return
         }
@@ -950,7 +961,7 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
@@ -992,7 +1003,7 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
@@ -1021,7 +1032,7 @@ public final class PortfolioViewModel: ObservableObject {
     }
 
     private func fetchBinanceGbpUsdFallback(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard isAppActive, updateId == currentUpdateId else {
+        guard isCurrentUpdate(updateId) else {
             completion(nil, nil)
             return
         }
@@ -1043,7 +1054,7 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil, nil)
                 return
             }
@@ -1084,7 +1095,7 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil)
                 return
             }
@@ -1130,7 +1141,7 @@ public final class PortfolioViewModel: ObservableObject {
                 completion(nil)
                 return
             }
-            guard let self = self, self.isAppActive, updateId == self.currentUpdateId else {
+            guard let self = self, self.isCurrentUpdate(updateId) else {
                 completion(nil)
                 return
             }
