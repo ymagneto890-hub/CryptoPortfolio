@@ -533,22 +533,23 @@ public final class PortfolioViewModel: ObservableObject {
             self.isUpdatingPrices = false
             self.lastLiveUpdateDate = Date()
 
-            // Aplicar tipos de cambio solo si fueron recibidos válidos y finitos
-            if let eurRate = fetchedEurUsdRate, eurRate.isFinite, !eurRate.isNaN, eurRate > 0 {
+            // Apply rates only when both value and source timestamp are valid.
+            // A bad rate must not abort the rest of the quote update.
+            if let eurRate = fetchedEurUsdRate,
+               let rateDate = fetchedEurUsdDate,
+               self.isExchangeRateUsable(eurRate, date: rateDate, now: Date()) {
                 self.eurUsdRate = eurRate
-                guard let rateDate = fetchedEurUsdDate,
-                      self.isExchangeRateUsable(eurRate, date: rateDate, now: Date()) else { return }
                 self.eurUsdRateDate = rateDate
                 UserDefaults.standard.set(eurRate, forKey: Keys.lastEurUsdRate)
-                UserDefaults.standard.set(self.eurUsdRateDate, forKey: Keys.lastEurRateDate)
+                UserDefaults.standard.set(rateDate, forKey: Keys.lastEurRateDate)
             }
-            if let gbpRate = fetchedGbpUsdRate, gbpRate.isFinite, !gbpRate.isNaN, gbpRate > 0 {
+            if let gbpRate = fetchedGbpUsdRate,
+               let rateDate = fetchedGbpUsdDate,
+               self.isExchangeRateUsable(gbpRate, date: rateDate, now: Date()) {
                 self.gbpUsdRate = gbpRate
-                guard let rateDate = fetchedGbpUsdDate,
-                      self.isExchangeRateUsable(gbpRate, date: rateDate, now: Date()) else { return }
                 self.gbpUsdRateDate = rateDate
                 UserDefaults.standard.set(gbpRate, forKey: Keys.lastGbpUsdRate)
-                UserDefaults.standard.set(self.gbpUsdRateDate, forKey: Keys.lastGbpRateDate)
+                UserDefaults.standard.set(rateDate, forKey: Keys.lastGbpRateDate)
             }
 
             // Aplicar cotizaciones frescas preservando timestamps más recientes
