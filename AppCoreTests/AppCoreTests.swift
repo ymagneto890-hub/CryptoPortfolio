@@ -411,12 +411,21 @@ final class AppCoreTests: XCTestCase {
     }
 
 
-    // 29. Las tasas oficiales diarias pueden cubrir el cierre de fin de semana.
+    // 29. Las tasas de referencia diarias pueden cubrir el cierre de fin de semana.
     func test29_tasaDeReferenciaDiariaCubreFinDeSemana() {
         let now = Date()
         vm.eurUsdRate = 1.10
         vm.eurUsdRateDate = now.addingTimeInterval(-72 * 3600)
         XCTAssertNotNil(vm.convertAmount(100, from: "EUR", to: "USD", now: now))
+    }
+
+    // 30. Una conexión HTTP remota se rechaza antes de iniciar el estado de sincronización.
+    func test30_rechazaHTTPRemotoSinDejarSyncActivo() {
+        vm.pcHost = "192.168.1.20"
+        vm.pcPort = "8765"
+        vm.performSync()
+        XCTAssertFalse(vm.isSyncing)
+        XCTAssertTrue(vm.statusText.contains("HTTP no seguro"))
     }
 
 }
