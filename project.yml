@@ -25,6 +25,8 @@ targets:
       path: AppCore/Info.plist
       properties:
         CFBundleDisplayName: Portfolio
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

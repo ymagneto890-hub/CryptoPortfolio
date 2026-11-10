@@ -24,6 +24,8 @@ public final class PortfolioViewModel: ObservableObject {
         static let pcHost = "pc_server_host"
         static let pcPort = "pc_server_port"
         static let displayCurrency = "preferred_display_currency"
+        static let liquidityBaseAmount = "portfolio_liquidity_base_amount"
+        static let liquidityBaseCurrency = "portfolio_liquidity_base_currency"
         static let lastEurUsdRate = "last_valid_eur_usd_rate"
         static let lastEurRateDate = "last_valid_eur_usd_rate_date"
         static let lastGbpUsdRate = "last_valid_gbp_usd_rate"
@@ -33,9 +35,9 @@ public final class PortfolioViewModel: ObservableObject {
 
     // MARK: - Control de Temporizadores y Concurrencia
     private var priceTimer: Timer?
-    // Battery/network efficiency: refresh every five minutes while the app is foregrounded.
+    // Battery/network efficiency: refresh every fifteen minutes while the app is foregrounded.
     // Manual refresh remains immediate and background refreshes are stopped by scene lifecycle.
-    private let autoUpdateInterval: TimeInterval = 300.0
+    private let autoUpdateInterval: TimeInterval = 900.0
 
     private var currentUpdateId: Int = 0
     private var currentSyncGen: Int = 0
@@ -44,6 +46,10 @@ public final class PortfolioViewModel: ObservableObject {
     private let tasksLock = NSLock()
     private let startsAutomatically: Bool
     private let session: URLSession
+    // Liquidity from the PC server is entered in EUR. Keep its source amount
+    // separate from the converted value shown in the current display currency.
+    private var liquidityBaseAmount: Double?
+    private var liquidityBaseCurrency: String = "EUR"
 
     // MARK: - Tipos de Cambio Reales y Antigüedad Máxima
     public var eurUsdRate: Double? = nil
@@ -249,9 +255,20 @@ public final class PortfolioViewModel: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: Keys.cachedPortfolio) {
             let decoder = JSONDecoder()
             if let decoded = try? decoder.decode(PortfolioPayload.self, from: data) {
+                let defaults = UserDefaults.standard
+                if let savedBaseAmount = defaults.object(forKey: Keys.liquidityBaseAmount) as? Double,
+                   let savedBaseCurrency = defaults.string(forKey: Keys.liquidityBaseCurrency) {
+                    liquidityBaseAmount = savedBaseAmount
+                    liquidityBaseCurrency = savedBaseCurrency
+                } else {
+                    // Migrate existing caches: their liquidity is already expressed
+                    // in the payload's currency, even if that was USD.
+                    liquidityBaseAmount = decoded.liquidity
+                    liquidityBaseCurrency = decoded.currency
+                }
                 self.portfolio = decoded
                 self.hasSyncedOnce = true
-                if UserDefaults.standard.string(forKey: Keys.displayCurrency) == nil {
+                if defaults.string(forKey: Keys.displayCurrency) == nil {
                     self.displayCurrency = decoded.currency
                 }
                 recalculatePortfolioFromBase(targetCurrency: self.displayCurrency)
@@ -263,6 +280,10 @@ public final class PortfolioViewModel: ObservableObject {
         let encoder = JSONEncoder()
         if let encoded = try? encoder.encode(payload) {
             UserDefaults.standard.set(encoded, forKey: Keys.cachedPortfolio)
+        }
+        if let amount = liquidityBaseAmount {
+            UserDefaults.standard.set(amount, forKey: Keys.liquidityBaseAmount)
+            UserDefaults.standard.set(liquidityBaseCurrency, forKey: Keys.liquidityBaseCurrency)
         }
     }
 
@@ -393,6 +414,11 @@ public final class PortfolioViewModel: ObservableObject {
                             newPayload.total_pnl_pct = nil
                             newPayload.valuation_status = .unvalued
 
+                            // The PC widget stores and sends liquidity in EUR.
+                            let baseLiq = newPayload.base_liquidity ?? newPayload.liquidity
+                            self.liquidityBaseAmount = baseLiq
+                            self.liquidityBaseCurrency = "EUR"
+                            newPayload.base_liquidity = baseLiq
                             self.portfolio = newPayload
                             self.hasSyncedOnce = true
                             self.isConnectedToPC = true
@@ -515,10 +541,11 @@ public final class PortfolioViewModel: ObservableObject {
         }
 
         // 3. Obtener cotizaciones de cada activo único
-        let uniqueCoins = Array(Set(positions.map { $0.coin }))
+        let positionsByCoin = Dictionary(grouping: positions, by: \.coin)
+        let uniqueCoins = Array(positionsByCoin.keys)
 
         for coin in uniqueCoins {
-            guard let samplePos = positions.first(where: { $0.coin == coin }) else { continue }
+            guard let samplePos = positionsByCoin[coin]?.first else { continue }
             group.enter()
 
             if samplePos.source == "yahoo" {
@@ -626,14 +653,20 @@ public final class PortfolioViewModel: ObservableObject {
 
     // MARK: - Recálculo Matemático Riguroso desde Posiciones Base
     public func recalculatePortfolioFromBase(targetCurrency: String) {
-        guard var current = self.portfolio, let positions = current.positions, !positions.isEmpty else {
+        guard var current = self.portfolio else {
+            return
+        }
+        let positions = current.positions ?? []
+        let baseLiq = liquidityBaseAmount ?? current.immutableBaseLiquidityEUR
+        guard !positions.isEmpty || baseLiq > 0 else {
             return
         }
 
         let targetSym = (targetCurrency == "EUR") ? "€" : (targetCurrency == "GBP" ? "£" : "$")
         let now = Date()
 
-        let uniqueCoins = Array(Set(positions.map { $0.coin }))
+        let positionsByCoin = Dictionary(grouping: positions, by: \.coin)
+        let uniqueCoins = Array(positionsByCoin.keys)
         let totalCoinsCount = uniqueCoins.count
 
         var coinInvestedInTarget: [String: Double] = [:]
@@ -647,7 +680,7 @@ public final class PortfolioViewModel: ObservableObject {
         var allCurrenciesConvertible = true
 
         for coin in uniqueCoins {
-            let coinPositions = positions.filter { $0.coin == coin }
+            let coinPositions = positionsByCoin[coin] ?? []
             guard let firstPos = coinPositions.first else { continue }
             coinMetaMap[coin] = firstPos
 
@@ -723,7 +756,9 @@ public final class PortfolioViewModel: ObservableObject {
         let valuedCoinsCount = coinHasValidValuation.filter { $0.value }.count
 
         let valuationStatus: ValuationStatus
-        if valuedCoinsCount == totalCoinsCount && totalCoinsCount > 0 && allCurrenciesConvertible {
+        if totalCoinsCount == 0 && baseLiq > 0 {
+            valuationStatus = .complete
+        } else if valuedCoinsCount == totalCoinsCount && totalCoinsCount > 0 && allCurrenciesConvertible {
             valuationStatus = .complete
         } else if valuedCoinsCount > 0 {
             valuationStatus = .partial
@@ -731,15 +766,20 @@ public final class PortfolioViewModel: ObservableObject {
             valuationStatus = .unvalued
         }
 
-        // 4. Conversión rigurosa de liquidez a la divisa objetivo (EUR -> USD / GBP / EUR)
+        // 4. Conversión rigurosa de liquidez a la divisa objetivo siempre desde la base inmutable
+        let sourceLiquidity = baseLiq
+        let sourceCurrency = liquidityBaseCurrency
         var targetLiquidity = 0.0
-        if current.liquidity > 0 {
-            if targetCurrency == "EUR" {
-                targetLiquidity = current.liquidity
-            } else if let converted = convertAmount(current.liquidity, from: "EUR", to: targetCurrency) {
+        if sourceLiquidity > 0 {
+            if sourceCurrency == targetCurrency {
+                targetLiquidity = sourceLiquidity
+            } else if let converted = convertAmount(sourceLiquidity, from: sourceCurrency, to: targetCurrency) {
                 targetLiquidity = converted
-            } else {
+            } else if current.currency == targetCurrency {
+                // Keep the last displayed amount if a conversion rate is temporarily unavailable.
                 targetLiquidity = current.liquidity
+            } else {
+                targetLiquidity = sourceLiquidity
             }
         }
         let roundedLiquidity = round2(targetLiquidity)
@@ -753,11 +793,17 @@ public final class PortfolioViewModel: ObservableObject {
 
         switch valuationStatus {
         case .complete:
-            let sumVal = coinValueInTarget.values.reduce(0.0, +)
-            totalValue = round2(sumVal + roundedLiquidity)
-            let pnl = sumVal - totalInvestedAll
-            totalPnl = round2(pnl)
-            totalPnlPct = totalInvestedAll > 0 ? round2((pnl / totalInvestedAll) * 100.0) : 0.0
+            if totalCoinsCount == 0 {
+                totalValue = round2(roundedLiquidity)
+                totalPnl = 0.0
+                totalPnlPct = 0.0
+            } else {
+                let sumVal = coinValueInTarget.values.reduce(0.0, +)
+                totalValue = round2(sumVal + roundedLiquidity)
+                let pnl = sumVal - totalInvestedAll
+                totalPnl = round2(pnl)
+                totalPnlPct = totalInvestedAll > 0 ? round2((pnl / totalInvestedAll) * 100.0) : 0.0
+            }
 
         case .partial:
             // Regla matemática: En valoración parcial, totalValue representa el subtotal cotizado más liquidez
@@ -828,7 +874,7 @@ public final class PortfolioViewModel: ObservableObject {
         current.currency = targetCurrency
         current.currency_symbol = targetSym
         current.total_invested = round2(totalInvestedAll)
-        current.investmentTotalIsComplete = allCurrenciesConvertible
+        current.investmentTotalIsComplete = allCurrenciesConvertible || totalCoinsCount == 0
         current.total_value = totalValue
         current.total_pnl = totalPnl
         current.total_pnl_pct = totalPnlPct
@@ -836,6 +882,7 @@ public final class PortfolioViewModel: ObservableObject {
         current.valued_count = valuedCoinsCount
         current.total_count = totalCoinsCount
         current.liquidity = roundedLiquidity
+        current.base_liquidity = baseLiq
         current.items = newItems
 
         withAnimation(.easeInOut(duration: 0.15)) {

@@ -4,9 +4,18 @@ import XCTest
 final class AppCoreTests: XCTestCase {
 
     var vm: PortfolioViewModel!
+    private let defaults = UserDefaults.standard
+    private let isolatedKeys = [
+        "cached_portfolio_data_v4", "cached_market_quotes_v4",
+        "preferred_display_currency", "portfolio_liquidity_base_amount",
+        "portfolio_liquidity_base_currency", "last_valid_eur_usd_rate",
+        "last_valid_eur_usd_rate_date", "last_valid_gbp_usd_rate",
+        "last_valid_gbp_usd_rate_date"
+    ]
 
     override func setUp() {
         super.setUp()
+        isolatedKeys.forEach { defaults.removeObject(forKey: $0) }
         vm = PortfolioViewModel(startAutomatically: false)
         vm.stopForegroundUpdates() // Aislar de temporizadores asíncronos para pruebas unitarias
     }
@@ -14,7 +23,56 @@ final class AppCoreTests: XCTestCase {
     override func tearDown() {
         vm.stopForegroundUpdates()
         vm = nil
+        isolatedKeys.forEach { defaults.removeObject(forKey: $0) }
         super.tearDown()
+    }
+
+    func testLiquidezNoSeMultiplicaAlAlternarDivisa() throws {
+        let now = Date()
+        vm.eurUsdRate = 1.25
+        vm.eurUsdRateDate = now
+        vm.isAppActive = false
+        defaults.set("EUR", forKey: "preferred_display_currency")
+        defaults.set(750.97, forKey: "portfolio_liquidity_base_amount")
+        defaults.set("EUR", forKey: "portfolio_liquidity_base_currency")
+
+        let cachedPayload = PortfolioPayload(
+            currency: "EUR",
+            liquidity: 750.97,
+            positions: [
+                RawPosition(coin: "BTC", name: "Bitcoin", icon: "₿", color: "#F3BA2F",
+                            source: "binance", invested: 100, entry_price: 50000, currency: "EUR")
+            ]
+        )
+        defaults.set(try JSONEncoder().encode(cachedPayload), forKey: "cached_portfolio_data_v4")
+        vm.loadCachedData()
+
+        vm.toggleCurrency()
+        XCTAssertEqual(vm.displayCurrency, "USD")
+        XCTAssertEqual(vm.portfolio?.liquidity ?? 0, 938.71, accuracy: 0.01)
+
+        vm.toggleCurrency()
+        XCTAssertEqual(vm.displayCurrency, "EUR")
+        XCTAssertEqual(vm.portfolio?.liquidity ?? 0, 750.97, accuracy: 0.01)
+
+        vm.toggleCurrency()
+        XCTAssertEqual(vm.portfolio?.liquidity ?? 0, 938.71, accuracy: 0.01)
+    }
+
+    func testCarteraSinPosicionesConservaYConvierteLiquidez() {
+        let now = Date()
+        vm.eurUsdRate = 1.25
+        vm.eurUsdRateDate = now
+        vm.portfolio = PortfolioPayload(currency: "EUR", liquidity: 750.97, positions: [])
+
+        vm.recalculatePortfolioFromBase(targetCurrency: "USD")
+        XCTAssertEqual(vm.portfolio?.currency, "USD")
+        XCTAssertEqual(vm.portfolio?.liquidity ?? 0, 938.71, accuracy: 0.01)
+        XCTAssertEqual(vm.portfolio?.total_value ?? 0, 938.71, accuracy: 0.01)
+        XCTAssertTrue(vm.portfolio?.items.isEmpty ?? false)
+
+        vm.recalculatePortfolioFromBase(targetCurrency: "EUR")
+        XCTAssertEqual(vm.portfolio?.liquidity ?? 0, 750.97, accuracy: 0.01)
     }
 
     // 1. Sin cotizaciones iniciales
@@ -526,6 +584,77 @@ final class AppCoreTests: XCTestCase {
         // Activos valen 1.200, Liquidez vale 1.200 -> Total 2.400. BTC debe representar exactamente 50%
         let btcShare = vm.portfolio?.items.first?.share_pct ?? 0.0
         XCTAssertEqual(btcShare, 50.0)
+    }
+
+    // 34. Inmutabilidad de baseLiquidity: múltiples conversiones EUR <-> USD consecutivas no sufren deriva ni inflación exponencial
+    func test34_inmutabilidadDeLiquidezBaseEvitaDeriva() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now
+        let payload = PortfolioPayload(
+            currency: "EUR",
+            liquidity: 1000.0,
+            base_liquidity: 1000.0,
+            positions: [
+                RawPosition(coin: "BTC", name: "Bitcoin", icon: "₿", color: "#F3BA2F", source: "binance", invested: 1000.0, entry_price: 50000.0, currency: "EUR")
+            ]
+        )
+        vm.portfolio = payload
+        vm.lastKnownQuotes = [
+            "BTC": MarketQuote(symbol: "BTC", price: 50000.0, currency: "EUR", timestamp: now, source: "binance", isVerifiedTimestamp: true)
+        ]
+
+        // 10 cambios seguidos entre USD y EUR
+        for _ in 0..<5 {
+            vm.recalculatePortfolioFromBase(targetCurrency: "USD")
+            XCTAssertEqual(vm.portfolio?.liquidity, 1100.0, "La liquidez en USD debe ser exactamente 1.100")
+            vm.recalculatePortfolioFromBase(targetCurrency: "EUR")
+            XCTAssertEqual(vm.portfolio?.liquidity, 1000.0, "Al volver a EUR debe recuperar los 1.000 sin ninguna deriva")
+        }
+    }
+
+    // 35. Cartera sin posiciones activas (solo liquidez disponible) se valora al 100% como completa y muestra el anillo
+    func test35_carteraSoloConLiquidezSeValoraCorrectamente() {
+        let payload = PortfolioPayload(
+            currency: "EUR",
+            liquidity: 750.97,
+            base_liquidity: 750.97,
+            positions: []
+        )
+        vm.portfolio = payload
+        vm.recalculatePortfolioFromBase(targetCurrency: "EUR")
+
+        XCTAssertEqual(vm.portfolio?.valuation_status, .complete)
+        XCTAssertEqual(vm.portfolio?.total_invested, 0.0)
+        XCTAssertEqual(vm.portfolio?.liquidity, 750.97)
+        XCTAssertEqual(vm.portfolio?.total_value, 750.97)
+        XCTAssertEqual(vm.portfolio?.total_pnl, 0.0)
+        XCTAssertEqual(vm.portfolio?.total_pnl_pct, 0.0)
+        XCTAssertEqual(vm.portfolio?.items.count, 0)
+    }
+
+    // 36. Serialización y deserialización JSON de base_liquidity preserva compatibilidad hacia atrás
+    func test36_serializacionBaseLiquidityRetrocompatible() throws {
+        let jsonWithoutBase = """
+        {
+            "currency": "EUR",
+            "currency_symbol": "€",
+            "total_invested": 0.0,
+            "liquidity": 500.0,
+            "items": []
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(PortfolioPayload.self, from: jsonWithoutBase)
+        XCTAssertEqual(decoded.liquidity, 500.0)
+        XCTAssertEqual(decoded.base_liquidity, 500.0)
+        XCTAssertEqual(decoded.immutableBaseLiquidityEUR, 500.0)
+
+        let encoder = JSONEncoder()
+        let reEncoded = try encoder.encode(decoded)
+        let reDecoded = try decoder.decode(PortfolioPayload.self, from: reEncoded)
+        XCTAssertEqual(reDecoded.base_liquidity, 500.0)
     }
 
 }

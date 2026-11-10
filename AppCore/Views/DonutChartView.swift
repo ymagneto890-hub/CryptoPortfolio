@@ -58,7 +58,7 @@ public struct DonutChartView: View {
 
     public var body: some View {
         ZStack {
-            if isWaitingFirstSync || items.isEmpty {
+            if isWaitingFirstSync || (items.isEmpty && liquidity <= 0) {
                 Circle()
                     .stroke(
                         Color(white: 0.18),
@@ -286,7 +286,7 @@ public struct DonutChartView: View {
     }
 
     private var slices: [SliceData] {
-        guard investmentTotalIsComplete else { return [] }
+        guard investmentTotalIsComplete || (items.isEmpty && liquidity > 0) else { return [] }
         var result: [SliceData] = []
         var currentAngle: Double = -90.0
 

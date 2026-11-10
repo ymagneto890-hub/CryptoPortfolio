@@ -117,8 +117,13 @@ public struct PortfolioPayload: Codable, Equatable {
     public var valued_count: Int
     public var total_count: Int
     public var liquidity: Double
+    public var base_liquidity: Double?
     public var items: [PortfolioItem]
     public var positions: [RawPosition]?
+
+    public var immutableBaseLiquidityEUR: Double {
+        base_liquidity ?? liquidity
+    }
 
     public init(
         updated_at: String = "",
@@ -133,6 +138,7 @@ public struct PortfolioPayload: Codable, Equatable {
         valued_count: Int = 0,
         total_count: Int = 0,
         liquidity: Double = 0.0,
+        base_liquidity: Double? = nil,
         items: [PortfolioItem] = [],
         positions: [RawPosition]? = nil
     ) {
@@ -148,6 +154,7 @@ public struct PortfolioPayload: Codable, Equatable {
         self.valued_count = valued_count
         self.total_count = total_count
         self.liquidity = liquidity
+        self.base_liquidity = base_liquidity ?? liquidity
         self.items = items
         self.positions = positions
     }
@@ -155,7 +162,7 @@ public struct PortfolioPayload: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case updated_at, currency, currency_symbol, total_invested, investmentTotalIsComplete, total_value
         case total_pnl, total_pnl_pct, valuation_status, valued_count, total_count
-        case liquidity, items, positions
+        case liquidity, base_liquidity, items, positions
     }
 
     public init(from decoder: Decoder) throws {
@@ -172,6 +179,7 @@ public struct PortfolioPayload: Codable, Equatable {
         valued_count = try container.decodeIfPresent(Int.self, forKey: .valued_count) ?? 0
         total_count = try container.decodeIfPresent(Int.self, forKey: .total_count) ?? 0
         liquidity = try container.decodeIfPresent(Double.self, forKey: .liquidity) ?? 0.0
+        base_liquidity = try container.decodeIfPresent(Double.self, forKey: .base_liquidity) ?? liquidity
         items = try container.decodeIfPresent([PortfolioItem].self, forKey: .items) ?? []
         positions = try container.decodeIfPresent([RawPosition].self, forKey: .positions)
     }

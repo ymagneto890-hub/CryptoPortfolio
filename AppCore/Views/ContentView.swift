@@ -67,7 +67,7 @@ public struct ContentView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 6)
 
-                if let payload = vm.portfolio, !payload.items.isEmpty {
+                if let payload = vm.portfolio, (!payload.items.isEmpty || payload.liquidity > 0) {
                     // MARK: - Gráfica Redonda XL Interactiva
                     DonutChartView(
                         items: payload.items,
