@@ -119,7 +119,7 @@ jobs:
             --title "CryptoPortfolio $TAG" \
             --notes "IPA compilada y probada desde el commit $GITHUB_SHA. SHA-256 incluido en los assets."
           gh release upload "$TAG" CryptoPortfolio.ipa build-info.txt ipa-sha256.txt --clobber
-          RELEASE_TAG_COMMIT=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object.sha')
+          RELEASE_TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
           if [ "$RELEASE_TAG_COMMIT" != "$GITHUB_SHA" ]; then
             echo "Release tag does not point to the workflow source commit" >&2
             exit 1
