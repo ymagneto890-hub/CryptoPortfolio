@@ -648,13 +648,13 @@ final class AppCoreTests: XCTestCase {
         let decoder = JSONDecoder()
         let decoded = try decoder.decode(PortfolioPayload.self, from: jsonWithoutBase)
         XCTAssertEqual(decoded.liquidity, 500.0)
-        XCTAssertEqual(decoded.base_liquidity, 500.0)
+        XCTAssertNil(decoded.base_liquidity)
         XCTAssertEqual(decoded.immutableBaseLiquidityEUR, 500.0)
 
         let encoder = JSONEncoder()
         let reEncoded = try encoder.encode(decoded)
         let reDecoded = try decoder.decode(PortfolioPayload.self, from: reEncoded)
-        XCTAssertEqual(reDecoded.base_liquidity, 500.0)
+        XCTAssertNil(reDecoded.base_liquidity)
     }
 
 }

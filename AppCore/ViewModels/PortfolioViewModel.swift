@@ -260,6 +260,9 @@ public final class PortfolioViewModel: ObservableObject {
                    let savedBaseCurrency = defaults.string(forKey: Keys.liquidityBaseCurrency) {
                     liquidityBaseAmount = savedBaseAmount
                     liquidityBaseCurrency = savedBaseCurrency
+                } else if let persistedBaseAmount = decoded.base_liquidity {
+                    liquidityBaseAmount = persistedBaseAmount
+                    liquidityBaseCurrency = "EUR"
                 } else {
                     // Migrate existing caches: their liquidity is already expressed
                     // in the payload's currency, even if that was USD.

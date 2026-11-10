@@ -154,7 +154,7 @@ public struct PortfolioPayload: Codable, Equatable {
         self.valued_count = valued_count
         self.total_count = total_count
         self.liquidity = liquidity
-        self.base_liquidity = base_liquidity ?? liquidity
+        self.base_liquidity = base_liquidity
         self.items = items
         self.positions = positions
     }
@@ -179,7 +179,7 @@ public struct PortfolioPayload: Codable, Equatable {
         valued_count = try container.decodeIfPresent(Int.self, forKey: .valued_count) ?? 0
         total_count = try container.decodeIfPresent(Int.self, forKey: .total_count) ?? 0
         liquidity = try container.decodeIfPresent(Double.self, forKey: .liquidity) ?? 0.0
-        base_liquidity = try container.decodeIfPresent(Double.self, forKey: .base_liquidity) ?? liquidity
+        base_liquidity = try container.decodeIfPresent(Double.self, forKey: .base_liquidity)
         items = try container.decodeIfPresent([PortfolioItem].self, forKey: .items) ?? []
         positions = try container.decodeIfPresent([RawPosition].self, forKey: .positions)
     }
