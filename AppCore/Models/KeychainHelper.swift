@@ -7,8 +7,8 @@ import Security
 ///   utilizando el nivel de protección `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
 /// - IMPORTANTE: El token NO está almacenado en el Secure Enclave (el Secure Enclave está
 ///   reservado para claves asimétricas de 256 bits y biometría FaceID/TouchID, no para contraseñas simétricas).
-/// - ADVERTENCIA DE RED: La comunicación con el servidor local del PC se realiza a través de HTTP sin TLS,
-///   por lo que el token viaja en texto claro en la cabecera `Authorization: Bearer <token>` dentro de la red local.
+/// - SEGURIDAD DE RED: La app exige HTTPS para servidores remotos y solo permite HTTP en loopback.
+///   No se envía el token Bearer a servidores remotos que no usen TLS.
 public enum KeychainHelper {
     private static let service = "com.cryptowidget.portfolio"
     private static let tokenAccount = "pc_server_api_token"
