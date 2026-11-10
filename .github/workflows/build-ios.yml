@@ -55,15 +55,28 @@ jobs:
             SIM_NAME="iPhone 16"
           fi
           echo "Running XCTest on: $SIM_NAME"
-          timeout 8m xcodebuild test \
-            -project AppCore.xcodeproj \
-            -scheme AppCore \
-            -destination "platform=iOS Simulator,name=$SIM_NAME" \
-            -destination-timeout 180 \
-            -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+          python3 - <<'PY'
+          import subprocess
+          import sys
+
+          command = [
+              "xcodebuild", "test",
+              "-project", "AppCore.xcodeproj",
+              "-scheme", "AppCore",
+              "-destination", f"platform=iOS Simulator,name={__import__('os').environ['SIM_NAME']}",
+              "-destination-timeout", "180",
+              "-parallel-testing-enabled", "NO",
+              "CODE_SIGNING_ALLOWED=NO",
+              "CODE_SIGNING_REQUIRED=NO",
+              "CODE_SIGN_IDENTITY=",
+          ]
+          try:
+              result = subprocess.run(command, timeout=480)
+              sys.exit(result.returncode)
+          except subprocess.TimeoutExpired:
+              print("XCTest exceeded the 8-minute limit", file=sys.stderr)
+              sys.exit(124)
+          PY
 
       - name: Build iOS 15-compatible Release archive
         run: |
