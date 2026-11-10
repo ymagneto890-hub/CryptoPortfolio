@@ -657,4 +657,33 @@ final class AppCoreTests: XCTestCase {
         XCTAssertNil(reDecoded.base_liquidity)
     }
 
+    // 37. Validar que Ajustes permite IPs privadas en HTTP local pero exige HTTPS en IPs públicas
+    func test37_validacionGuardarAjustesRedLocalYHTTPS() {
+        let vm = PortfolioViewModel(startAutomatically: false)
+
+        let lanResult = vm.validateServerHostInput("192.168.1.128")
+        XCTAssertTrue(lanResult.allowed)
+        XCTAssertEqual(lanResult.normalizedHost, "192.168.1.128")
+        XCTAssertNil(lanResult.errorMessage)
+
+        let httpLanResult = vm.validateServerHostInput("http://192.168.1.128")
+        XCTAssertTrue(httpLanResult.allowed)
+        XCTAssertEqual(httpLanResult.normalizedHost, "192.168.1.128")
+
+        let localResult = vm.validateServerHostInput("localhost")
+        XCTAssertTrue(localResult.allowed)
+        XCTAssertEqual(localResult.normalizedHost, "localhost")
+
+        let httpsResult = vm.validateServerHostInput("https://192.168.1.128")
+        XCTAssertTrue(httpsResult.allowed)
+        XCTAssertEqual(httpsResult.normalizedHost, "https://192.168.1.128")
+
+        let publicHttpResult = vm.validateServerHostInput("8.8.8.8")
+        XCTAssertFalse(publicHttpResult.allowed)
+        XCTAssertNotNil(publicHttpResult.errorMessage)
+
+        let badHttpsResult = vm.validateServerHostInput("https://")
+        XCTAssertFalse(badHttpsResult.allowed)
+    }
+
 }

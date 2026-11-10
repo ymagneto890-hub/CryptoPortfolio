@@ -451,6 +451,25 @@ public final class PortfolioViewModel: ObservableObject {
         }
     }
 
+    /// Validates user-entered server host/URL and normalizes local HTTP inputs to bare hosts.
+    public func validateServerHostInput(_ rawHost: String) -> (allowed: Bool, normalizedHost: String, errorMessage: String?) {
+        let cleanHost = rawHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowerHost = cleanHost.lowercased()
+        if lowerHost.hasPrefix("https://") {
+            let hostOnly = String(cleanHost.dropFirst("https://".count))
+            guard isValidHost(hostOnly) else {
+                return (false, cleanHost, "Introduce una dirección IP válida después de https:// (ej: https://192.168.1.128).")
+            }
+            return (true, cleanHost, nil)
+        }
+
+        let strippedHost = lowerHost.hasPrefix("http://") ? String(cleanHost.dropFirst("http://".count)) : cleanHost
+        guard isLocalNetworkHost(strippedHost) else {
+            return (false, cleanHost, "HTTP solo se permite en tu red WiFi local (ej: 192.168.1.128) o localhost. Para servidores externos activa HTTPS y escribe https:// antes de la IP.")
+        }
+        return (true, strippedHost, nil)
+    }
+
     // RFC 1918 private IPv4 ranges plus loopback. Link-local/public addresses are not trusted.
     func isLocalNetworkHost(_ host: String) -> Bool {
         if host == "localhost" || host == "127.0.0.1" { return true }

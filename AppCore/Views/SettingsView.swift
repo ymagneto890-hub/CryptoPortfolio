@@ -46,7 +46,7 @@ public struct SettingsView: View {
                     HStack {
                         Image(systemName: "desktopcomputer")
                             .foregroundColor(.gray)
-                        TextField("https://IP del PC (ej: https://192.168.1.128)", text: $inputHost)
+                        TextField("IP del PC (ej: 192.168.1.128)", text: $inputHost)
                             .font(.system(size: 14, design: .monospaced))
                             .foregroundColor(.white)
                             .keyboardType(.URL)
@@ -100,10 +100,15 @@ public struct SettingsView: View {
 
                 // Botón Guardar y Sincronizar
                 Button(action: {
-                    let cleanHost = inputHost.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let isLoopback = cleanHost == "localhost" || cleanHost == "127.0.0.1"
-                    guard cleanHost.lowercased().hasPrefix("https://") || isLoopback else {
-                        saveErrorMessage = "Para conectarte al PC por la red, activa HTTPS en el servidor y escribe https:// antes de la IP. HTTP solo se permite en localhost."
+                    let validation = vm.validateServerHostInput(inputHost)
+                    guard validation.allowed else {
+                        saveErrorMessage = validation.errorMessage ?? "Dirección del servidor no válida."
+                        showingSaveError = true
+                        return
+                    }
+                    let cleanPort = inputPort.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard let portInt = Int(cleanPort), (1...65535).contains(portInt) else {
+                        saveErrorMessage = "Introduce un puerto válido (1–65535, por ejemplo 8765)."
                         showingSaveError = true
                         return
                     }
@@ -118,7 +123,7 @@ public struct SettingsView: View {
                         showingSaveError = true
                         return
                     }
-                    vm.saveConnectionSettings(host: cleanHost, port: inputPort)
+                    vm.saveConnectionSettings(host: validation.normalizedHost, port: cleanPort)
                     vm.performSync(isManual: true)
                     presentationMode.wrappedValue.dismiss()
                 }) {
@@ -134,7 +139,7 @@ public struct SettingsView: View {
                     .cornerRadius(10)
                 }
 
-                Text("El token se guarda en el Keychain del iPhone. Para servidores PC remotos se exige HTTPS; instala y confía en el certificado TLS. HTTP solo se permite en localhost.")
+                Text("El token se guarda en el Keychain del iPhone. HTTP solo está permitido en tu red WiFi local; para servidores externos se exige HTTPS.")
                     .font(.system(size: 10))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
