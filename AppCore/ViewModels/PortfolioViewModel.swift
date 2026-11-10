@@ -43,6 +43,7 @@ public final class PortfolioViewModel: ObservableObject {
     private var activeDataTasks: Set<URLSessionDataTask> = []
     private let tasksLock = NSLock()
     private let startsAutomatically: Bool
+    private let session: URLSession
 
     // MARK: - Tipos de Cambio Reales y Antigüedad Máxima
     public var eurUsdRate: Double? = nil
@@ -52,15 +53,16 @@ public final class PortfolioViewModel: ObservableObject {
     public var gbpUsdRateDate: Date? = nil
 
     // Políticas estrictas de frescura por tipo de activo
-    public let maxRateAgeSeconds: TimeInterval = 48 * 3600       // 48 horas máx para tipos de cambio FX
+    public let maxRateAgeSeconds: TimeInterval = 96 * 3600       // Hasta 4 días para tasas oficiales diarias (incluye fines de semana)
     public let maxCryptoAgeSeconds: TimeInterval = 24 * 3600     // 24 horas máx para criptomonedas (mercado 24/7)
     public let maxStockAgeSeconds: TimeInterval = 5 * 86400      // 5 días máx para bolsa/ETFs (fines de semana/festivos)
 
     // Diccionario de cotizaciones verificadas (acceso serializado en DispatchQueue.main)
     public var lastKnownQuotes: [String: MarketQuote] = [:]
 
-    public init(startAutomatically: Bool = true) {
+    public init(startAutomatically: Bool = true, session: URLSession = .shared) {
         self.startsAutomatically = startAutomatically
+        self.session = session
         let defaults = UserDefaults.standard
 
         if let savedHost = defaults.string(forKey: Keys.pcHost), !savedHost.isEmpty {
@@ -320,11 +322,17 @@ public final class PortfolioViewModel: ObservableObject {
         request.timeoutInterval = 4.0
 
         if let token = KeychainHelper.loadToken(), !token.isEmpty {
+            let isLoopback = cleanHost == "localhost" || cleanHost == "127.0.0.1"
+            guard url.scheme?.lowercased() == "https" || isLoopback else {
+                isConnectedToPC = false
+                statusText = "Conexión HTTP insegura: no se ha enviado el token. Configura HTTPS en el servidor PC."
+                return
+            }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
         var syncTask: URLSessionDataTask?
-        syncTask = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        syncTask = session.dataTask(with: request) { [weak self] data, response, error in
             defer {
                 if let t = syncTask {
                     self?.unregisterTask(t)
@@ -942,198 +950,101 @@ public final class PortfolioViewModel: ObservableObject {
 
     // MARK: - Clientes de Red Nativos Seguros (Cancelación Limpia y Generaciones)
 
-    // Tipo de cambio EUR/USD: Yahoo Finance EURUSD=X (tasa FX real fiduciaria)
+    // Yahoo Finance is primary. If its timestamp is absent/invalid, use Frankfurter's
+    // dated ECB reference rate; never promote a local receipt time to a market timestamp.
     private func fetchRealEurUsdRate(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=15m&range=1d") else {
-            completion(nil, nil)
-            return
-        }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 4.0
-        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
-
-        var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
-            defer {
-                if let t = task { self?.unregisterTask(t) }
+        fetchYahooFxRate(symbol: "EURUSD=X", updateId: updateId) { [weak self] rate, date in
+            guard let self = self else { completion(nil, nil); return }
+            if let rate = rate, let date = date {
+                completion(rate, date)
+            } else {
+                self.fetchFrankfurterRate(base: "EUR", quote: "USD", updateId: updateId, completion: completion)
             }
-
-            if let urlErr = error as? URLError, urlErr.code == .cancelled {
-                completion(nil, nil)
-                return
-            }
-            guard let self = self, self.isCurrentUpdate(updateId) else {
-                completion(nil, nil)
-                return
-            }
-
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-               let data = data, error == nil,
-               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let chart = root["chart"] as? [String: Any],
-               let results = chart["result"] as? [[String: Any]],
-               let first = results.first,
-               let meta = first["meta"] as? [String: Any],
-               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0,
-               let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) {
-                let rateDate = Date(timeIntervalSince1970: regTime)
-                if isExchangeRateUsable(price, date: rateDate, now: Date()) {
-                    completion(price, rateDate)
-                    return
-                }
-            }
-
-            // No substitute a missing market timestamp with the local receipt time.
-            // Fall back to the live Binance EURUSDT observation instead.
-            self.fetchBinanceEurUsdFallback(updateId: updateId, completion: completion)
-        }
-
-        if let t = task {
-            registerTask(t)
-            t.resume()
         }
     }
 
-    private func fetchBinanceEurUsdFallback(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard isCurrentUpdate(updateId) else {
-            completion(nil, nil)
-            return
-        }
-
-        guard let url = URL(string: "https://api.binance.com/api/v3/ticker/price?symbol=EURUSDT") else {
-            completion(nil, nil)
-            return
-        }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3.5
-
-        var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
-            defer {
-                if let t = task { self?.unregisterTask(t) }
-            }
-
-            if let urlErr = error as? URLError, urlErr.code == .cancelled {
-                completion(nil, nil)
-                return
-            }
-            guard let self = self, self.isCurrentUpdate(updateId) else {
-                completion(nil, nil)
-                return
-            }
-
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-               let data = data, error == nil,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let priceStr = json["price"] as? String,
-               let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
-                // This is a local observation time from Binance ticker/price, not an exchange event timestamp.
-                completion(rate, Date())
-                return
-            }
-            completion(nil, nil)
-        }
-
-        if let t = task {
-            registerTask(t)
-            t.resume()
-        }
-    }
-
-    // Tipo de cambio GBP/USD: Yahoo Finance GBPUSD=X (tasa FX real fiduciaria)
     private func fetchRealGbpUsdRate(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/GBPUSD=X?interval=15m&range=1d") else {
-            completion(nil, nil)
-            return
-        }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 4.0
-        req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
-
-        var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
-            defer {
-                if let t = task { self?.unregisterTask(t) }
+        fetchYahooFxRate(symbol: "GBPUSD=X", updateId: updateId) { [weak self] rate, date in
+            guard let self = self else { completion(nil, nil); return }
+            if let rate = rate, let date = date {
+                completion(rate, date)
+            } else {
+                self.fetchFrankfurterRate(base: "GBP", quote: "USD", updateId: updateId, completion: completion)
             }
-
-            if let urlErr = error as? URLError, urlErr.code == .cancelled {
-                completion(nil, nil)
-                return
-            }
-            guard let self = self, self.isCurrentUpdate(updateId) else {
-                completion(nil, nil)
-                return
-            }
-
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-               let data = data, error == nil,
-               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let chart = root["chart"] as? [String: Any],
-               let results = chart["result"] as? [[String: Any]],
-               let first = results.first,
-               let meta = first["meta"] as? [String: Any],
-               let price = meta["regularMarketPrice"] as? Double, price.isFinite, !price.isNaN, price > 0,
-               let regTime = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) {
-                let rateDate = Date(timeIntervalSince1970: regTime)
-                if isExchangeRateUsable(price, date: rateDate, now: Date()) {
-                    completion(price, rateDate)
-                    return
-                }
-            }
-
-            // Missing or invalid Yahoo market time is not replaced with the local receipt time.
-            self.fetchBinanceGbpUsdFallback(updateId: updateId, completion: completion)
-        }
-
-        if let t = task {
-            registerTask(t)
-            t.resume()
         }
     }
 
-    private func fetchBinanceGbpUsdFallback(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
-        guard isCurrentUpdate(updateId) else {
+    private func fetchYahooFxRate(symbol: String, updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
+        guard let encoded = encodedYahooSymbol(symbol),
+              let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?interval=15m&range=1d") else {
             completion(nil, nil)
             return
         }
-
-        guard let url = URL(string: "https://api.binance.com/api/v3/ticker/price?symbol=GBPUSDT") else {
-            completion(nil, nil)
-            return
-        }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3.5
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
-            defer {
-                if let t = task { self?.unregisterTask(t) }
-            }
-
-            if let urlErr = error as? URLError, urlErr.code == .cancelled {
+        task = session.dataTask(with: request) { [weak self] data, response, error in
+            defer { if let task = task { self?.unregisterTask(task) } }
+            guard let self = self, error == nil, self.isCurrentUpdate(updateId),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data,
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let chart = root["chart"] as? [String: Any],
+                  let results = chart["result"] as? [[String: Any]],
+                  let meta = results.first?["meta"] as? [String: Any],
+                  let price = meta["regularMarketPrice"] as? Double,
+                  let timestamp = (meta["regularMarketTime"] as? TimeInterval) ?? (meta["regularMarketTime"] as? Int).map({ TimeInterval($0) }) else {
                 completion(nil, nil)
                 return
             }
-            guard let self = self, self.isCurrentUpdate(updateId) else {
+            let date = Date(timeIntervalSince1970: timestamp)
+            guard self.isExchangeRateUsable(price, date: date, now: Date()) else {
                 completion(nil, nil)
                 return
             }
+            completion(price, date)
+        }
+        if let task = task { registerTask(task); task.resume() }
+    }
 
-            if let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-               let data = data, error == nil,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let priceStr = json["price"] as? String,
-               let rate = Double(priceStr), rate.isFinite, !rate.isNaN, rate > 0 {
-                completion(rate, Date())
-                return
-            }
+    // Frankfurter publishes dated ECB reference rates. The date is the source date,
+    // not the device's receipt time. The four-day age limit accommodates weekends.
+    private func fetchFrankfurterRate(base: String, quote: String, updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
+        guard isCurrentUpdate(updateId),
+              let url = URL(string: "https://api.frankfurter.app/latest?from=\(base)&to=\(quote)") else {
             completion(nil, nil)
+            return
         }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4.0
 
-        if let t = task {
-            registerTask(t)
-            t.resume()
+        var task: URLSessionDataTask?
+        task = session.dataTask(with: request) { [weak self] data, response, error in
+            defer { if let task = task { self?.unregisterTask(task) } }
+            guard let self = self, error == nil, self.isCurrentUpdate(updateId),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let dateString = json["date"] as? String,
+                  let rates = json["rates"] as? [String: Any],
+                  let rate = rates[quote] as? Double else {
+                completion(nil, nil)
+                return
+            }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd"
+            guard let sourceDate = formatter.date(from: dateString),
+                  self.isExchangeRateUsable(rate, date: sourceDate, now: Date()) else {
+                completion(nil, nil)
+                return
+            }
+            completion(rate, sourceDate)
         }
+        if let task = task { registerTask(task); task.resume() }
     }
 
     // Cotización de criptomonedas en Binance (Pares USDT)
@@ -1152,7 +1063,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.timeoutInterval = 4.0
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
+        task = session.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
@@ -1198,7 +1109,7 @@ public final class PortfolioViewModel: ObservableObject {
         req.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)", forHTTPHeaderField: "User-Agent")
 
         var task: URLSessionDataTask?
-        task = URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
+        task = session.dataTask(with: req) { [weak self] data, response, error in
             defer {
                 if let t = task { self?.unregisterTask(t) }
             }
