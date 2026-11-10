@@ -18,6 +18,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout exact source revision
         uses: actions/checkout@v4
@@ -54,7 +55,7 @@ jobs:
             SIM_NAME="iPhone 16"
           fi
           echo "Running XCTest on: $SIM_NAME"
-          xcodebuild test \
+          timeout 8m xcodebuild test \
             -project AppCore.xcodeproj \
             -scheme AppCore \
             -destination "platform=iOS Simulator,name=$SIM_NAME" \
