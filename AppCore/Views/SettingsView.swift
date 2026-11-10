@@ -46,10 +46,10 @@ public struct SettingsView: View {
                     HStack {
                         Image(systemName: "desktopcomputer")
                             .foregroundColor(.gray)
-                        TextField("IP del PC (ej: 192.168.1.128)", text: $inputHost)
+                        TextField("https://IP del PC (ej: https://192.168.1.128)", text: $inputHost)
                             .font(.system(size: 14, design: .monospaced))
                             .foregroundColor(.white)
-                            .keyboardType(.numbersAndPunctuation)
+                            .keyboardType(.URL)
                             .autocapitalization(.none)
                             .disableAutocorrection(true)
                     }
@@ -100,6 +100,13 @@ public struct SettingsView: View {
 
                 // Botón Guardar y Sincronizar
                 Button(action: {
+                    let cleanHost = inputHost.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let isLoopback = cleanHost == "localhost" || cleanHost == "127.0.0.1"
+                    guard cleanHost.lowercased().hasPrefix("https://") || isLoopback else {
+                        saveErrorMessage = "Para conectarte al PC por la red, activa HTTPS en el servidor y escribe https:// antes de la IP. HTTP solo se permite en localhost."
+                        showingSaveError = true
+                        return
+                    }
                     let cleanToken = inputToken.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !cleanToken.isEmpty else {
                         saveErrorMessage = "Introduce el token de acceso del servidor."
@@ -111,7 +118,7 @@ public struct SettingsView: View {
                         showingSaveError = true
                         return
                     }
-                    vm.saveConnectionSettings(host: inputHost, port: inputPort)
+                    vm.saveConnectionSettings(host: cleanHost, port: inputPort)
                     vm.performSync(isManual: true)
                     presentationMode.wrappedValue.dismiss()
                 }) {
@@ -127,7 +134,7 @@ public struct SettingsView: View {
                     .cornerRadius(10)
                 }
 
-                Text("El token se guarda en el Keychain del iPhone (no en Secure Enclave). En la red local, el tráfico HTTP viaja sin cifrar TLS.")
+                Text("El token se guarda en el Keychain del iPhone. Para servidores PC remotos se exige HTTPS; instala y confía en el certificado TLS. HTTP solo se permite en localhost.")
                     .font(.system(size: 10))
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
