@@ -1,0 +1,40 @@
+workflows:
+  ios-release:
+    name: Build CryptoPortfolio iOS IPA
+    max_build_duration: 30
+    instance_type: mac_mini_m1
+    environment:
+      xcode: 16.0
+    scripts:
+      - name: Install XcodeGen
+        script: |
+          brew install xcodegen
+      - name: Generate Xcode project
+        script: |
+          xcodegen generate --spec project.yml
+      - name: Run Swift XCTest suite
+        script: |
+          xcodebuild test \
+            -project CryptoPortfolio.xcodeproj \
+            -scheme AppCoreTests \
+            -destination 'platform=iOS Simulator,name=iPhone SE (1st generation)' \
+            -disable-concurrent-testing
+      - name: Build iOS Release Archive
+        script: |
+          xcodebuild clean archive \
+            -project CryptoPortfolio.xcodeproj \
+            -scheme CryptoPortfolio \
+            -configuration Release \
+            -archivePath build/CryptoPortfolio.xcarchive \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+      - name: Package IPA
+        script: |
+          mkdir -p build/Payload
+          cp -R build/CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app build/Payload/
+          cd build && zip -qr CryptoPortfolio.ipa Payload
+    artifacts:
+      - build/CryptoPortfolio.ipa
