@@ -419,13 +419,39 @@ final class AppCoreTests: XCTestCase {
         XCTAssertNotNil(vm.convertAmount(100, from: "EUR", to: "USD", now: now))
     }
 
-    // 30. Una conexión HTTP remota se rechaza antes de iniciar el estado de sincronización.
+    // 30. HTTP hacia una IP pública se rechaza antes de iniciar la sincronización.
     func test30_rechazaHTTPRemotoSinDejarSyncActivo() {
-        vm.pcHost = "192.168.1.20"
+        vm.pcHost = "8.8.8.8"
         vm.pcPort = "8765"
         vm.performSync()
         XCTAssertFalse(vm.isSyncing)
-        XCTAssertTrue(vm.statusText.contains("HTTP no seguro"))
+        XCTAssertTrue(vm.statusText.contains("HTTP solo está permitido"))
+    }
+
+    // 31. HTTP hacia el servidor del PC en una IP privada sí inicia la sincronización.
+    func test31_permiteHTTPSincronizacionEnRedLocal() {
+        vm.pcHost = "192.168.1.128"
+        vm.pcPort = "8765"
+        vm.performSync()
+        XCTAssertTrue(vm.isSyncing)
+        XCTAssertEqual(vm.statusText, "Sincronizando...")
+        vm.stopForegroundUpdates() // Cancela la petición de prueba sin depender de un PC real.
+        XCTAssertFalse(vm.isSyncing)
+    }
+
+    // 32. Solo se consideran locales loopback y los tres rangos IPv4 privados RFC 1918.
+    func test32_detectaRangosDeRedLocal() {
+        XCTAssertTrue(vm.isLocalNetworkHost("192.168.1.128"))
+        XCTAssertTrue(vm.isLocalNetworkHost("10.0.0.5"))
+        XCTAssertTrue(vm.isLocalNetworkHost("172.16.0.1"))
+        XCTAssertTrue(vm.isLocalNetworkHost("172.31.255.254"))
+        XCTAssertTrue(vm.isLocalNetworkHost("localhost"))
+        XCTAssertTrue(vm.isLocalNetworkHost("127.0.0.1"))
+
+        XCTAssertFalse(vm.isLocalNetworkHost("8.8.8.8"))
+        XCTAssertFalse(vm.isLocalNetworkHost("172.32.0.1"))
+        XCTAssertFalse(vm.isLocalNetworkHost("169.254.1.2"))
+        XCTAssertFalse(vm.isLocalNetworkHost("192.168.1"))
     }
 
 }
