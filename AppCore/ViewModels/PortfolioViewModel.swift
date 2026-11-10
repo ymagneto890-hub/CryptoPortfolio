@@ -314,10 +314,10 @@ public final class PortfolioViewModel: ObservableObject {
             return
         }
 
-        let isLoopback = hostOnly == "localhost" || hostOnly == "127.0.0.1"
-        guard url.scheme?.lowercased() == "https" || isLoopback else {
+        // HTTP is permitted only on private LAN/loopback addresses. Public hosts still require HTTPS.
+        guard url.scheme?.lowercased() == "https" || isLocalNetworkHost(hostOnly) else {
             isConnectedToPC = false
-            statusText = "HTTP no seguro: usa https:// en la dirección del servidor PC."
+            statusText = "HTTP solo está permitido en la red local. Para servidores externos usa HTTPS."
             return
         }
 
@@ -420,6 +420,22 @@ public final class PortfolioViewModel: ObservableObject {
             registerTask(t)
             t.resume()
         }
+    }
+
+    // RFC 1918 private IPv4 ranges plus loopback. Link-local/public addresses are not trusted.
+    func isLocalNetworkHost(_ host: String) -> Bool {
+        if host == "localhost" || host == "127.0.0.1" { return true }
+
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return false }
+        let octets = parts.compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+
+        let first = octets[0]
+        let second = octets[1]
+        return first == 10
+            || (first == 172 && (16...31).contains(second))
+            || (first == 192 && second == 168)
     }
 
     private func isValidHost(_ host: String) -> Bool {
