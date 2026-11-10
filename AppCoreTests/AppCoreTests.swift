@@ -412,7 +412,7 @@ final class AppCoreTests: XCTestCase {
 
 
     // 29. Las tasas oficiales diarias pueden cubrir el cierre de fin de semana.
-    func test29_tipoCambioECBDeFinDeSemanaSigueVigente() {
+    func test29_tasaDeReferenciaDiariaCubreFinDeSemana() {
         let now = Date()
         vm.eurUsdRate = 1.10
         vm.eurUsdRateDate = now.addingTimeInterval(-72 * 3600)
