@@ -230,10 +230,10 @@ final class AppCoreTests: XCTestCase {
     func test13_tipoDeCambioCaducado() {
         let now = Date()
         vm.eurUsdRate = 1.10
-        vm.eurUsdRateDate = now.addingTimeInterval(-49 * 3600) // 49 horas de antigüedad
+        vm.eurUsdRateDate = now.addingTimeInterval(-97 * 3600) // 97 horas de antigüedad
 
         let res = vm.convertAmount(100.0, from: "USD", to: "EUR", now: now)
-        XCTAssertNil(res, "El tipo de cambio con más de 48h debe ser rechazado como caducado")
+        XCTAssertNil(res, "El tipo de cambio con más de 96h debe ser rechazado como caducado")
     }
 
     // 14. Tipo de cambio futuro
@@ -418,5 +418,13 @@ final class AppCoreTests: XCTestCase {
         XCTAssertNil(vm.convertAmount(100, from: "GBP", to: "EUR", now: now))
     }
 
+
+    // 29. Las tasas oficiales diarias pueden cubrir el cierre de fin de semana.
+    func test29_tipoCambioECBDeFinDeSemanaSigueVigente() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now.addingTimeInterval(-72 * 3600)
+        XCTAssertNotNil(vm.convertAmount(100, from: "EUR", to: "USD", now: now))
+    }
 
 }
