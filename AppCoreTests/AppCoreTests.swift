@@ -333,14 +333,6 @@ final class AppCoreTests: XCTestCase {
         XCTAssertFalse(vm.isSyncing)
     }
 
-    // 22. Callback antiguo después de una actualización nueva
-    func test22_callbackAntiguoDespuesDeNuevaActualizacion() {
-        let oldUpdateId = 1
-        let currentUpdateId = 2
-        let shouldApply = (oldUpdateId == currentUpdateId)
-        XCTAssertFalse(shouldApply, "Callback antiguo debe ser descartado")
-    }
-
     // 23. Entrada en background y reanudación
     func test23_backgroundYReanudacion() {
         vm.applicationWillResignActive()
