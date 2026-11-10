@@ -314,6 +314,13 @@ public final class PortfolioViewModel: ObservableObject {
             return
         }
 
+        let isLoopback = hostOnly == "localhost" || hostOnly == "127.0.0.1"
+        guard url.scheme?.lowercased() == "https" || isLoopback else {
+            isConnectedToPC = false
+            statusText = "HTTP no seguro: usa https:// en la dirección del servidor PC."
+            return
+        }
+
         currentSyncGen += 1
         let thisSyncGen = currentSyncGen
 
@@ -323,13 +330,6 @@ public final class PortfolioViewModel: ObservableObject {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = 4.0
-
-        let isLoopback = hostOnly == "localhost" || hostOnly == "127.0.0.1"
-        guard url.scheme?.lowercased() == "https" || isLoopback else {
-            isConnectedToPC = false
-            statusText = "HTTP no seguro: usa https:// en la dirección del servidor PC."
-            return
-        }
 
         if let token = KeychainHelper.loadToken(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -956,7 +956,7 @@ public final class PortfolioViewModel: ObservableObject {
     // MARK: - Clientes de Red Nativos Seguros (Cancelación Limpia y Generaciones)
 
     // Yahoo Finance is primary. If its timestamp is absent/invalid, use Frankfurter's
-    // dated ECB reference rate; never promote a local receipt time to a market timestamp.
+    // dated institutional reference rate; never promote a local receipt time to a market timestamp.
     private func fetchRealEurUsdRate(updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
         fetchYahooFxRate(symbol: "EURUSD=X", updateId: updateId) { [weak self] rate, date in
             guard let self = self else { completion(nil, nil); return }
