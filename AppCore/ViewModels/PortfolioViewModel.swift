@@ -1014,11 +1014,11 @@ public final class PortfolioViewModel: ObservableObject {
         if let task = task { registerTask(task); task.resume() }
     }
 
-    // Frankfurter publishes dated ECB reference rates. The date is the source date,
+    // Frankfurter publishes dated reference rates from institutional providers. The date is the source date,
     // not the device's receipt time. The four-day age limit accommodates weekends.
     private func fetchFrankfurterRate(base: String, quote: String, updateId: Int, completion: @escaping (Double?, Date?) -> Void) {
         guard isCurrentUpdate(updateId),
-              let url = URL(string: "https://api.frankfurter.app/latest?from=\(base)&to=\(quote)") else {
+              let url = URL(string: "https://api.frankfurter.dev/v2/rate/\(base.lowercased())/\(quote.lowercased())") else {
             completion(nil, nil)
             return
         }
@@ -1033,8 +1033,7 @@ public final class PortfolioViewModel: ObservableObject {
                   let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let dateString = json["date"] as? String,
-                  let rates = json["rates"] as? [String: Any],
-                  let rate = rates[quote] as? Double else {
+                  let rate = json["rate"] as? Double else {
                 completion(nil, nil)
                 return
             }
