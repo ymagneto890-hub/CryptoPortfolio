@@ -55,7 +55,9 @@ jobs:
             SIM_NAME="iPhone 16"
           fi
           echo "Running XCTest on: $SIM_NAME"
+          export SIM_NAME
           python3 - <<'PY'
+          import os
           import subprocess
           import sys
 
@@ -63,7 +65,7 @@ jobs:
               "xcodebuild", "test",
               "-project", "AppCore.xcodeproj",
               "-scheme", "AppCore",
-              "-destination", f"platform=iOS Simulator,name={__import__('os').environ['SIM_NAME']}",
+              "-destination", f"platform=iOS Simulator,name={os.environ['SIM_NAME']}",
               "-destination-timeout", "180",
               "-parallel-testing-enabled", "NO",
               "CODE_SIGNING_ALLOWED=NO",
