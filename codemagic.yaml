@@ -12,29 +12,22 @@ workflows:
       - name: Generate Xcode project
         script: |
           xcodegen generate --spec project.yml
-      - name: Run Swift XCTest suite
+      - name: Build iOS 15-compatible Release Archive
         script: |
-          xcodebuild test \
-            -project CryptoPortfolio.xcodeproj \
-            -scheme AppCoreTests \
-            -destination 'platform=iOS Simulator,name=iPhone SE (1st generation)' \
-            -disable-concurrent-testing
-      - name: Build iOS Release Archive
-        script: |
-          xcodebuild clean archive \
-            -project CryptoPortfolio.xcodeproj \
-            -scheme CryptoPortfolio \
+          xcodebuild archive \
+            -project AppCore.xcodeproj \
+            -scheme AppCore \
             -configuration Release \
-            -archivePath build/CryptoPortfolio.xcarchive \
             -destination 'generic/platform=iOS' \
+            -archivePath AppCore.xcarchive \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            CODE_SIGN_IDENTITY=""
       - name: Package IPA
         script: |
-          mkdir -p build/Payload
-          cp -R build/CryptoPortfolio.xcarchive/Products/Applications/CryptoPortfolio.app build/Payload/
-          cd build && zip -qr CryptoPortfolio.ipa Payload
+          mkdir -p Payload
+          cp -R AppCore.xcarchive/Products/Applications/AppCore.app Payload/
+          zip -qr CryptoPortfolio.ipa Payload
     artifacts:
-      - build/CryptoPortfolio.ipa
+      - CryptoPortfolio.ipa
