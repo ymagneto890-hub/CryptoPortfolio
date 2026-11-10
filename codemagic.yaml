@@ -14,10 +14,15 @@ workflows:
           xcodegen generate --spec project.yml
       - name: Run iOS unit tests
         script: |
+          SIM_NAME=$(xcrun simctl list devices available | grep "iPhone" | head -n 1 | sed -E 's/^[[:space:]]*//; s/[[:space:]]*\(.*//')
+          if [ -z "$SIM_NAME" ]; then
+            SIM_NAME="iPhone 16"
+          fi
+          echo "Testing on simulator: $SIM_NAME"
           xcodebuild test \
             -project AppCore.xcodeproj \
             -scheme AppCore \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,name=$SIM_NAME" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
