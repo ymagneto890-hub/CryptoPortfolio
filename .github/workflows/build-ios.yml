@@ -1,27 +1,30 @@
 name: Build CryptoPortfolio iOS IPA
 
 on:
+  pull_request:
+    branches: [main, master, 'release/**']
   push:
-    branches:
-      - main
-      - master
-    tags:
-      - "v*"
+    branches: [main, master, 'release/**']
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout repository
+      - name: Checkout exact source revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Select Xcode
         run: |
@@ -32,10 +35,10 @@ jobs:
           fi
           xcodebuild -version
 
-      - name: Install Pinned XcodeGen (2.42.0)
+      - name: Install pinned XcodeGen
         run: |
           XCODEGEN_VER="2.42.0"
-          curl -Ls "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VER}/xcodegen.zip" -o xcodegen.zip
+          curl -fL --retry 3 "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VER}/xcodegen.zip" -o xcodegen.zip
           unzip -q xcodegen.zip
           cd xcodegen && sudo ./install.sh && cd ..
           rm -rf xcodegen xcodegen.zip
@@ -44,22 +47,40 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Run Swift unit tests
+      - name: Run Swift XCTest suite
         run: |
+          set -o pipefail
           SIM_NAME=$(xcrun simctl list devices available | grep -E 'iPhone 1[5-7]' | head -n 1 | sed -E 's/^[[:space:]]+//' | sed -E 's/ \([A-F0-9-]+\).*//')
           if [ -z "$SIM_NAME" ]; then
             SIM_NAME="iPhone 16"
           fi
           echo "Running XCTest on: $SIM_NAME"
-          xcodebuild test \
-            -project AppCore.xcodeproj \
-            -scheme AppCore \
-            -destination "platform=iOS Simulator,name=$SIM_NAME" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+          export SIM_NAME
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
 
-      - name: Build Release archive
+          command = [
+              "xcodebuild", "test",
+              "-project", "AppCore.xcodeproj",
+              "-scheme", "AppCore",
+              "-destination", f"platform=iOS Simulator,name={os.environ['SIM_NAME']}",
+              "-destination-timeout", "180",
+              "-parallel-testing-enabled", "NO",
+              "CODE_SIGNING_ALLOWED=NO",
+              "CODE_SIGNING_REQUIRED=NO",
+              "CODE_SIGN_IDENTITY=",
+          ]
+          try:
+              result = subprocess.run(command, timeout=480)
+              sys.exit(result.returncode)
+          except subprocess.TimeoutExpired:
+              print("XCTest exceeded the 8-minute limit", file=sys.stderr)
+              sys.exit(124)
+          PY
+
+      - name: Build iOS 15-compatible Release archive
         run: |
           xcodebuild archive \
             -project AppCore.xcodeproj \
@@ -67,37 +88,66 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath AppCore.xcarchive \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
       - name: Package and validate IPA
         run: |
+          set -euo pipefail
           APP="AppCore.xcarchive/Products/Applications/AppCore.app"
           test -d "$APP"
           test -x "$APP/AppCore"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          DEPLOYMENT_TARGET=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")
+          test "$DEPLOYMENT_TARGET" = "15.0"
           mkdir -p Payload
           cp -R "$APP" Payload/
-          zip -r CryptoPortfolio.ipa Payload
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload CryptoPortfolio.ipa
           test -s CryptoPortfolio.ipa
-          echo "=== IPA SIZE ==="
+          unzip -t CryptoPortfolio.ipa
+          unzip -Z1 CryptoPortfolio.ipa | grep -q '^Payload/AppCore.app/'
+          printf 'commit=%s\nref=%s\nrun=%s\n' "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_RUN_ID" > build-info.txt
+          shasum -a 256 CryptoPortfolio.ipa | tee ipa-sha256.txt
+          echo "Built commit: $GITHUB_SHA"
+          echo "Minimum iOS: $DEPLOYMENT_TARGET"
           ls -lh CryptoPortfolio.ipa
-          du -sh Payload/AppCore.app
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CryptoPortfolio-iOS-IPA
-          path: CryptoPortfolio.ipa
+          name: CryptoPortfolio-IPA-${{ github.sha }}
+          path: |
+            CryptoPortfolio.ipa
+            build-info.txt
+            ipa-sha256.txt
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish GitHub Release
+      - name: Publish or update tag Release
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v1.2.1 CryptoPortfolio.ipa \
-            --title "CryptoPortfolio v1.2.1 (iOS 15+ Native IPA)" \
-            --notes "CryptoPortfolio 1.2.1 compilado para TrollStore con optimizaciones de memoria, validación de tickers y resiliencia de red." \
-            --clobber || true
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            TAG="${GITHUB_REF_NAME#release/}"
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "CryptoPortfolio $TAG" \
+              --notes "IPA compilada y probada desde el commit $GITHUB_SHA. SHA-256 incluido en los assets."
+          else
+            TAG="$GITHUB_REF_NAME"
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+              --verify-tag \
+              --title "CryptoPortfolio $TAG" \
+              --notes "IPA compilada y probada desde el commit $GITHUB_SHA. SHA-256 incluido en los assets."
+          fi
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          gh release upload "$TAG" CryptoPortfolio.ipa build-info.txt ipa-sha256.txt --clobber
+          RELEASE_TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
+          if [ "$RELEASE_TAG_COMMIT" != "$GITHUB_SHA" ]; then
+            echo "Release tag does not point to the workflow source commit" >&2
+            exit 1
+          fi

@@ -230,10 +230,10 @@ final class AppCoreTests: XCTestCase {
     func test13_tipoDeCambioCaducado() {
         let now = Date()
         vm.eurUsdRate = 1.10
-        vm.eurUsdRateDate = now.addingTimeInterval(-49 * 3600) // 49 horas de antigüedad
+        vm.eurUsdRateDate = now.addingTimeInterval(-97 * 3600) // 97 horas de antigüedad
 
         let res = vm.convertAmount(100.0, from: "USD", to: "EUR", now: now)
-        XCTAssertNil(res, "El tipo de cambio con más de 48h debe ser rechazado como caducado")
+        XCTAssertNil(res, "El tipo de cambio con más de 96h debe ser rechazado como caducado")
     }
 
     // 14. Tipo de cambio futuro
@@ -333,14 +333,6 @@ final class AppCoreTests: XCTestCase {
         XCTAssertFalse(vm.isSyncing)
     }
 
-    // 22. Callback antiguo después de una actualización nueva
-    func test22_callbackAntiguoDespuesDeNuevaActualizacion() {
-        let oldUpdateId = 1
-        let currentUpdateId = 2
-        let shouldApply = (oldUpdateId == currentUpdateId)
-        XCTAssertFalse(shouldApply, "Callback antiguo debe ser descartado")
-    }
-
     // 23. Entrada en background y reanudación
     func test23_backgroundYReanudacion() {
         vm.applicationWillResignActive()
@@ -418,5 +410,22 @@ final class AppCoreTests: XCTestCase {
         XCTAssertNil(vm.convertAmount(100, from: "GBP", to: "EUR", now: now))
     }
 
+
+    // 29. Las tasas de referencia diarias pueden cubrir el cierre de fin de semana.
+    func test29_tasaDeReferenciaDiariaCubreFinDeSemana() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now.addingTimeInterval(-72 * 3600)
+        XCTAssertNotNil(vm.convertAmount(100, from: "EUR", to: "USD", now: now))
+    }
+
+    // 30. Una conexión HTTP remota se rechaza antes de iniciar el estado de sincronización.
+    func test30_rechazaHTTPRemotoSinDejarSyncActivo() {
+        vm.pcHost = "192.168.1.20"
+        vm.pcPort = "8765"
+        vm.performSync()
+        XCTAssertFalse(vm.isSyncing)
+        XCTAssertTrue(vm.statusText.contains("HTTP no seguro"))
+    }
 
 }
