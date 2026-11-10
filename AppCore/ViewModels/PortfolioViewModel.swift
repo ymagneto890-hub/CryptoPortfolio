@@ -294,8 +294,11 @@ public final class PortfolioViewModel: ObservableObject {
 
         let cleanHost = pcHost.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanPort = pcPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usesHTTPS = cleanHost.lowercased().hasPrefix("https://")
+        let hostOnly = usesHTTPS ? String(cleanHost.dropFirst("https://".count)) : cleanHost
+        let scheme = usesHTTPS ? "https" : "http"
 
-        guard isValidHost(cleanHost), let portInt = Int(cleanPort), (1...65535).contains(portInt) else {
+        guard isValidHost(hostOnly), let portInt = Int(cleanPort), (1...65535).contains(portInt) else {
             DispatchQueue.main.async {
                 self.isConnectedToPC = false
                 self.statusText = "IP o puerto no válido"
@@ -303,7 +306,7 @@ public final class PortfolioViewModel: ObservableObject {
             return
         }
 
-        guard let url = URL(string: "http://\(cleanHost):\(cleanPort)/api/portfolio") else {
+        guard let url = URL(string: "\(scheme)://\(hostOnly):\(cleanPort)/api/portfolio") else {
             DispatchQueue.main.async {
                 self.isConnectedToPC = false
                 self.statusText = "URL no válida"
@@ -321,13 +324,14 @@ public final class PortfolioViewModel: ObservableObject {
         request.httpMethod = "GET"
         request.timeoutInterval = 4.0
 
+        let isLoopback = hostOnly == "localhost" || hostOnly == "127.0.0.1"
+        guard url.scheme?.lowercased() == "https" || isLoopback else {
+            isConnectedToPC = false
+            statusText = "HTTP no seguro: usa https:// en la dirección del servidor PC."
+            return
+        }
+
         if let token = KeychainHelper.loadToken(), !token.isEmpty {
-            let isLoopback = cleanHost == "localhost" || cleanHost == "127.0.0.1"
-            guard url.scheme?.lowercased() == "https" || isLoopback else {
-                isConnectedToPC = false
-                statusText = "Conexión HTTP insegura: no se ha enviado el token. Configura HTTPS en el servidor PC."
-                return
-            }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -419,6 +423,7 @@ public final class PortfolioViewModel: ObservableObject {
     }
 
     private func isValidHost(_ host: String) -> Bool {
+        guard !host.isEmpty, !host.contains("://"), !host.contains("/"), !host.contains(":") else { return false }
         if host == "localhost" || host == "127.0.0.1" { return true }
         let parts = host.split(separator: ".")
         guard parts.count == 4 else { return false }
