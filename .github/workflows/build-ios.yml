@@ -2,7 +2,7 @@ name: Build CryptoPortfolio iOS IPA
 
 on:
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 'release/**']
   push:
     branches: [main, master]
     tags: ["v*"]
@@ -126,16 +126,25 @@ jobs:
           retention-days: 90
 
       - name: Publish or update tag Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="$GITHUB_REF_NAME"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
-            --verify-tag \
-            --title "CryptoPortfolio $TAG" \
-            --notes "IPA compilada y probada desde el commit $GITHUB_SHA. SHA-256 incluido en los assets."
+          if [[ "$GITHUB_REF" == refs/heads/release/* ]]; then
+            TAG="${GITHUB_REF_NAME#release/}"
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "CryptoPortfolio $TAG" \
+              --notes "IPA compilada y probada desde el commit $GITHUB_SHA. SHA-256 incluido en los assets."
+          else
+            TAG="$GITHUB_REF_NAME"
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" \
+              --verify-tag \
+              --title "CryptoPortfolio $TAG" \
+              --notes "IPA compilada y probada desde el commit $GITHUB_SHA. SHA-256 incluido en los assets."
+          fi
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
           gh release upload "$TAG" CryptoPortfolio.ipa build-info.txt ipa-sha256.txt --clobber
           RELEASE_TAG_COMMIT=$(git rev-parse "$TAG^{commit}")
           if [ "$RELEASE_TAG_COMMIT" != "$GITHUB_SHA" ]; then
