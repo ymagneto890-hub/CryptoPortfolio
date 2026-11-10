@@ -454,4 +454,78 @@ final class AppCoreTests: XCTestCase {
         XCTAssertFalse(vm.isLocalNetworkHost("192.168.1"))
     }
 
+    // 31. Liquidez en valoración completa suma al total_value sin adulterar el PnL de mercado
+    func test31_liquidezEnValoracionCompleta() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now
+        let payload = PortfolioPayload(
+            currency: "EUR",
+            liquidity: 2500.0,
+            positions: [
+                RawPosition(coin: "BTC", name: "Bitcoin", icon: "₿", color: "#F3BA2F", source: "binance", invested: 1000.0, entry_price: 50000.0, currency: "EUR")
+            ]
+        )
+        vm.portfolio = payload
+        vm.lastKnownQuotes = [
+            "BTC": MarketQuote(symbol: "BTC", price: 60000.0, currency: "EUR", timestamp: now, source: "binance", isVerifiedTimestamp: true)
+        ]
+        vm.recalculatePortfolioFromBase(targetCurrency: "EUR")
+
+        XCTAssertEqual(vm.portfolio?.valuation_status, .complete)
+        XCTAssertEqual(vm.portfolio?.total_invested, 1000.0)
+        XCTAssertEqual(vm.portfolio?.liquidity, 2500.0)
+        // Valor total = Activos (1.200) + Liquidez (2.500) = 3.700
+        XCTAssertEqual(vm.portfolio?.total_value, 3700.0)
+        // PnL solo de activos de mercado = 1.200 - 1.000 = +200 (+20%)
+        XCTAssertEqual(vm.portfolio?.total_pnl, 200.0)
+        XCTAssertEqual(vm.portfolio?.total_pnl_pct, 20.0)
+    }
+
+    // 32. Liquidez se convierte fielmente al conmutar divisa
+    func test32_liquidezConversionDeDivisa() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now
+        let payload = PortfolioPayload(
+            currency: "EUR",
+            liquidity: 1000.0,
+            positions: [
+                RawPosition(coin: "BTC", name: "Bitcoin", icon: "₿", color: "#F3BA2F", source: "binance", invested: 1000.0, entry_price: 50000.0, currency: "EUR")
+            ]
+        )
+        vm.portfolio = payload
+        vm.lastKnownQuotes = [
+            "BTC": MarketQuote(symbol: "BTC", price: 60000.0, currency: "EUR", timestamp: now, source: "binance", isVerifiedTimestamp: true)
+        ]
+        vm.recalculatePortfolioFromBase(targetCurrency: "USD")
+
+        XCTAssertEqual(vm.portfolio?.currency, "USD")
+        // 1.000 EUR a tasa 1.10 = 1.100 USD
+        XCTAssertEqual(vm.portfolio?.liquidity, 1100.0)
+    }
+
+    // 33. Reparto porcentual coherente incluyendo la liquidez
+    func test33_liquidezDistribucionPorcentual() {
+        let now = Date()
+        vm.eurUsdRate = 1.10
+        vm.eurUsdRateDate = now
+        let payload = PortfolioPayload(
+            currency: "EUR",
+            liquidity: 1200.0,
+            positions: [
+                RawPosition(coin: "BTC", name: "Bitcoin", icon: "₿", color: "#F3BA2F", source: "binance", invested: 1000.0, entry_price: 50000.0, currency: "EUR")
+            ]
+        )
+        vm.portfolio = payload
+        vm.lastKnownQuotes = [
+            "BTC": MarketQuote(symbol: "BTC", price: 60000.0, currency: "EUR", timestamp: now, source: "binance", isVerifiedTimestamp: true)
+        ]
+        vm.recalculatePortfolioFromBase(targetCurrency: "EUR")
+
+        // Activos valen 1.200, Liquidez vale 1.200 -> Total 2.400. BTC debe representar exactamente 50%
+        let btcShare = vm.portfolio?.items.first?.share_pct ?? 0.0
+        XCTAssertEqual(btcShare, 50.0)
+    }
+
 }

@@ -116,6 +116,7 @@ public struct PortfolioPayload: Codable, Equatable {
     public var valuation_status: ValuationStatus
     public var valued_count: Int
     public var total_count: Int
+    public var liquidity: Double
     public var items: [PortfolioItem]
     public var positions: [RawPosition]?
 
@@ -131,6 +132,7 @@ public struct PortfolioPayload: Codable, Equatable {
         valuation_status: ValuationStatus = .unvalued,
         valued_count: Int = 0,
         total_count: Int = 0,
+        liquidity: Double = 0.0,
         items: [PortfolioItem] = [],
         positions: [RawPosition]? = nil
     ) {
@@ -145,6 +147,7 @@ public struct PortfolioPayload: Codable, Equatable {
         self.valuation_status = valuation_status
         self.valued_count = valued_count
         self.total_count = total_count
+        self.liquidity = liquidity
         self.items = items
         self.positions = positions
     }
@@ -152,7 +155,7 @@ public struct PortfolioPayload: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case updated_at, currency, currency_symbol, total_invested, investmentTotalIsComplete, total_value
         case total_pnl, total_pnl_pct, valuation_status, valued_count, total_count
-        case items, positions
+        case liquidity, items, positions
     }
 
     public init(from decoder: Decoder) throws {
@@ -168,6 +171,7 @@ public struct PortfolioPayload: Codable, Equatable {
         valuation_status = try container.decodeIfPresent(ValuationStatus.self, forKey: .valuation_status) ?? .unvalued
         valued_count = try container.decodeIfPresent(Int.self, forKey: .valued_count) ?? 0
         total_count = try container.decodeIfPresent(Int.self, forKey: .total_count) ?? 0
+        liquidity = try container.decodeIfPresent(Double.self, forKey: .liquidity) ?? 0.0
         items = try container.decodeIfPresent([PortfolioItem].self, forKey: .items) ?? []
         positions = try container.decodeIfPresent([RawPosition].self, forKey: .positions)
     }

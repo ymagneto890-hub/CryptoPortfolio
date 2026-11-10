@@ -79,6 +79,7 @@ public struct ContentView: View {
                         valuedCount: payload.valued_count,
                         totalCount: payload.total_count,
                         investmentTotalIsComplete: payload.investmentTotalIsComplete,
+                        liquidity: payload.liquidity,
                         selectedSymbol: vm.selectedSymbol,
                         isWaitingFirstSync: false,
                         onCenterTap: {

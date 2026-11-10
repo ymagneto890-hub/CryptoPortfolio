@@ -731,7 +731,20 @@ public final class PortfolioViewModel: ObservableObject {
             valuationStatus = .unvalued
         }
 
-        // 4. Cálculo de Totales y Rentabilidad según estado
+        // 4. Conversión rigurosa de liquidez a la divisa objetivo (EUR -> USD / GBP / EUR)
+        var targetLiquidity = 0.0
+        if current.liquidity > 0 {
+            if targetCurrency == "EUR" {
+                targetLiquidity = current.liquidity
+            } else if let converted = convertAmount(current.liquidity, from: "EUR", to: targetCurrency) {
+                targetLiquidity = converted
+            } else {
+                targetLiquidity = current.liquidity
+            }
+        }
+        let roundedLiquidity = round2(targetLiquidity)
+
+        // Cálculo de Totales y Rentabilidad según estado
         let totalInvestedAll = coinInvestedInTarget.values.reduce(0.0, +)
 
         let totalValue: Double?
@@ -741,21 +754,21 @@ public final class PortfolioViewModel: ObservableObject {
         switch valuationStatus {
         case .complete:
             let sumVal = coinValueInTarget.values.reduce(0.0, +)
-            totalValue = round2(sumVal)
+            totalValue = round2(sumVal + roundedLiquidity)
             let pnl = sumVal - totalInvestedAll
             totalPnl = round2(pnl)
             totalPnlPct = totalInvestedAll > 0 ? round2((pnl / totalInvestedAll) * 100.0) : 0.0
 
         case .partial:
-            // Regla matemática: En valoración parcial, totalValue representa el subtotal cotizado
+            // Regla matemática: En valoración parcial, totalValue representa el subtotal cotizado más liquidez
             // NUNCA se resta el totalInvested de activos no cotizados para evitar falsas pérdidas
             let sumValued = coinValueInTarget.values.reduce(0.0, +)
-            totalValue = round2(sumValued)
+            totalValue = round2(sumValued + roundedLiquidity)
             totalPnl = nil
             totalPnlPct = nil
 
         case .unvalued:
-            totalValue = nil
+            totalValue = roundedLiquidity > 0 ? round2(roundedLiquidity) : nil
             totalPnl = nil
             totalPnlPct = nil
         }
@@ -787,12 +800,14 @@ public final class PortfolioViewModel: ObservableObject {
                 pnlPct = nil
             }
 
-            // Metodología única coherente de pesos (evita sumar > 100%):
-            if valuationStatus == .complete && (totalValue ?? 0) > 0, let curVal = val {
-                sharePct = (curVal / (totalValue ?? 1.0)) * 100.0
+            // Metodología única coherente de pesos (incluyendo liquidez si existe, evita sumar > 100%):
+            let totalPortfolioBase = (valuationStatus == .complete && (totalValue ?? 0) > 0) ? (totalValue ?? 1.0) : (totalInvestedAll + roundedLiquidity)
+            if totalPortfolioBase > 0, let curVal = val {
+                sharePct = (curVal / totalPortfolioBase) * 100.0
+            } else if totalPortfolioBase > 0 {
+                sharePct = (inv / totalPortfolioBase) * 100.0
             } else {
-                // En partial y unvalued: todos los activos usan exactamente el mismo denominador (totalInvestedAll)
-                sharePct = (totalInvestedAll > 0) ? (inv / totalInvestedAll) * 100.0 : 0.0
+                sharePct = 0.0
             }
 
             newItems.append(PortfolioItem(
@@ -820,6 +835,7 @@ public final class PortfolioViewModel: ObservableObject {
         current.valuation_status = valuationStatus
         current.valued_count = valuedCoinsCount
         current.total_count = totalCoinsCount
+        current.liquidity = roundedLiquidity
         current.items = newItems
 
         withAnimation(.easeInOut(duration: 0.15)) {

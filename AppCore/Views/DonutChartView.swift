@@ -11,9 +11,12 @@ public struct DonutChartView: View {
     public let valuedCount: Int
     public let totalCount: Int
     public let investmentTotalIsComplete: Bool
+    public let liquidity: Double
     public let selectedSymbol: String?
     public let isWaitingFirstSync: Bool
     public var onCenterTap: (() -> Void)? = nil
+
+    @State private var isShowingLiquidity: Bool = false
 
     private let size: CGFloat = 182
     private let lineWidth: CGFloat = 20
@@ -28,6 +31,7 @@ public struct DonutChartView: View {
         valuedCount: Int = 0,
         totalCount: Int = 0,
         investmentTotalIsComplete: Bool = true,
+        liquidity: Double = 0.0,
         selectedSymbol: String? = nil,
         isWaitingFirstSync: Bool = false,
         onCenterTap: (() -> Void)? = nil
@@ -41,6 +45,7 @@ public struct DonutChartView: View {
         self.valuedCount = valuedCount
         self.totalCount = totalCount
         self.investmentTotalIsComplete = investmentTotalIsComplete
+        self.liquidity = liquidity
         self.selectedSymbol = selectedSymbol
         self.isWaitingFirstSync = isWaitingFirstSync
         self.onCenterTap = onCenterTap
@@ -82,16 +87,19 @@ public struct DonutChartView: View {
 
                 // Segmentos de cada activo con distribución matemática coherente
                 ForEach(Array(slices.enumerated()), id: \.offset) { _, slice in
-                    let isDimmed = (selectedSymbol != nil && selectedSymbol != slice.symbol)
+                    let isLiqActive = isShowingLiquidity && selectedSymbol == nil
+                    let isHighlighted = (selectedSymbol == slice.symbol) || (isLiqActive && slice.symbol == "LIQ")
+                    let isDimmed = (selectedSymbol != nil && selectedSymbol != slice.symbol) || (isLiqActive && slice.symbol != "LIQ")
+
                     DonutSliceShape(startAngle: slice.startAngle, endAngle: slice.endAngle)
                         .stroke(
                             slice.color.opacity(isDimmed ? 0.25 : 1.0),
-                            style: StrokeStyle(lineWidth: selectedSymbol == slice.symbol ? lineWidth + 4 : lineWidth, lineCap: .butt)
+                            style: StrokeStyle(lineWidth: isHighlighted ? lineWidth + 4 : lineWidth, lineCap: .butt)
                         )
                         .frame(width: size, height: size)
                 }
 
-                // Contenido Central (Global o Activo Seleccionado)
+                // Contenido Central (Global, Activo Seleccionado o Liquidez)
                 if let item = selectedItem {
                     VStack(spacing: 3) {
                         HStack(spacing: 4) {
@@ -144,6 +152,35 @@ public struct DonutChartView: View {
                     .contentShape(Circle())
                     .onTapGesture {
                         onCenterTap?()
+                    }
+                } else if isShowingLiquidity && liquidity > 0 {
+                    VStack(spacing: 3) {
+                        let liqPct = (totalValue ?? 0) > 0 ? (liquidity / totalValue!) * 100.0 : 0.0
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color(red: 0.0, green: 0.90, blue: 0.55))
+                                .frame(width: 8, height: 8)
+                            Text("LIQ • \(String(format: "%.1f%%", liqPct))")
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundColor(Color(red: 0.0, green: 0.90, blue: 0.55))
+                        }
+
+                        Text(formattedValue(liquidity))
+                            .font(.system(size: 27, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+
+                        Text("Disponible")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(Color(white: 0.68))
+                    }
+                    .frame(width: size - (lineWidth * 2) - 8)
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isShowingLiquidity = false
+                        }
                     }
                 } else {
                     VStack(spacing: 3) {
@@ -210,10 +247,23 @@ public struct DonutChartView: View {
                         }
                     }
                     .frame(width: size - (lineWidth * 2) - 8)
+                    .contentShape(Circle())
+                    .onTapGesture(count: 2) {
+                        if liquidity > 0 {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                isShowingLiquidity = true
+                            }
+                        }
+                    }
                 }
             }
         }
         .frame(width: size + lineWidth + 6, height: size + lineWidth + 6)
+        .onChange(of: selectedSymbol) { newSym in
+            if newSym != nil {
+                isShowingLiquidity = false
+            }
+        }
     }
 
     private static let currencyFormatter: NumberFormatter = {
@@ -246,6 +296,17 @@ public struct DonutChartView: View {
                 let start = Angle(degrees: currentAngle)
                 let end = Angle(degrees: currentAngle + sweep - 1.5)
                 result.append(SliceData(symbol: item.symbol, startAngle: start, endAngle: end, color: item.uiColor))
+                currentAngle += sweep
+            }
+        }
+
+        if liquidity > 0, let tVal = totalValue, tVal > 0 {
+            let liqShare = (liquidity / tVal) * 100.0
+            let sweep = (liqShare / 100.0) * 360.0
+            if sweep > 0.5 {
+                let start = Angle(degrees: currentAngle)
+                let end = Angle(degrees: currentAngle + sweep - 1.5)
+                result.append(SliceData(symbol: "LIQ", startAngle: start, endAngle: end, color: Color(red: 0.0, green: 0.90, blue: 0.55)))
                 currentAngle += sweep
             }
         }
